@@ -1,31 +1,43 @@
 # API tests — compile as C to verify C compatibility of bt2_api.h
 
-# test_header: verifies the header compiles as C and types are accessible
-add_executable(test_header test_header.c)
-target_link_libraries(test_header bowtie2-align-s-lib)
-set_target_properties(test_header PROPERTIES
-  C_STANDARD 11
-  C_STANDARD_REQUIRED ON)
-add_test(NAME api-test-header
-  COMMAND test_header
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+# Helper macro for C API test executables
+macro(add_api_test name)
+  add_executable(${name} ${name}.c)
+  target_link_libraries(${name} bowtie2-align-s-lib)
+  set_target_properties(${name} PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON)
+  add_test(NAME api-${name}
+    COMMAND ${name}
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+endmacro()
 
-# test_link: verifies library links and basic functions are callable
-add_executable(test_link test_link.c)
-target_link_libraries(test_link bowtie2-align-s-lib)
-set_target_properties(test_link PROPERTIES
-  C_STANDARD 11
-  C_STANDARD_REQUIRED ON)
-add_test(NAME api-test-link
-  COMMAND test_link
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+# Phase 0 tests
+add_api_test(test_header)
+add_api_test(test_link)
+add_api_test(test_config_init)
 
-# test_config_init: verifies config defaults
-add_executable(test_config_init test_config_init.c)
-target_link_libraries(test_config_init bowtie2-align-s-lib)
-set_target_properties(test_config_init PROPERTIES
+# Phase 1 tests
+add_api_test(test_align_basic)
+add_api_test(test_align_paired)
+add_api_test(test_context_reuse)
+add_api_test(test_error_invalid_index)
+add_api_test(test_error_null)
+
+# api_dump helper (used by Python comparison tests)
+add_executable(api_dump api_dump.c)
+target_link_libraries(api_dump bowtie2-align-s-lib)
+set_target_properties(api_dump PROPERTIES
   C_STANDARD 11
   C_STANDARD_REQUIRED ON)
-add_test(NAME api-test-config-init
-  COMMAND test_config_init
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+# Python correctness comparison test
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if (Python3_FOUND)
+  add_test(NAME api-test-align-vs-native
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_align_vs_native.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  # Ensure native aligner and api_dump are built before the test runs
+  set_tests_properties(api-test-align-vs-native PROPERTIES
+    DEPENDS "api-test_align_basic")
+endif()
