@@ -296,10 +296,29 @@ set_target_properties(bowtie2-align-l bowtie2-build-l PROPERTIES COMPILE_FLAGS "
 set_target_properties(bowtie2-inspect-l PROPERTIES COMPILE_FLAGS "-DBOWTIE_64BIT_INDEX -DBOWTIE_INSPECT_MAIN")
 set_target_properties(bowtie2-inspect-s PROPERTIES COMPILE_FLAGS "-DBOWTIE_INSPECT_MAIN")
 
+# --- Library targets (reentrant C API) ---
+# BT2_NO_MAIN guards main() in bowtie_main.cpp so the same source list
+# can be used for both executable and library targets.
+set(SEARCH_LIB_CPPS ${SEARCH_CPPS} bt2_api.cpp)
+
+add_library(bowtie2-align-s-lib STATIC ${SEARCH_LIB_CPPS} ${SHARED_CPPS})
+add_library(bowtie2-align-l-lib STATIC ${SEARCH_LIB_CPPS} ${SHARED_CPPS})
+target_compile_definitions(bowtie2-align-s-lib PRIVATE BT2_NO_MAIN)
+target_compile_definitions(bowtie2-align-l-lib PRIVATE BT2_NO_MAIN BOWTIE_64BIT_INDEX)
+
+target_include_directories(bowtie2-align-s-lib PUBLIC ${PROJECT_SOURCE_DIR})
+target_include_directories(bowtie2-align-l-lib PUBLIC ${PROJECT_SOURCE_DIR})
+
 install(TARGETS ${BOWTIE2_BIN_LIST} DESTINATION bin)
 install(FILES ${BOWTIE2_WRAPPER_SCRIPTS}
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
   DESTINATION bin)
+# TODO: install library targets and bt2_api.h header for downstream consumers
+
+# --- API tests ---
+if (BUILD_TESTING)
+  add_subdirectory(tests/api)
+endif()
 
 add_test(NAME simple-align
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

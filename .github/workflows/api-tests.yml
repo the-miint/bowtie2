@@ -1,0 +1,55 @@
+name: API Tests
+on:
+  push:
+    branches:
+      - 'master'
+    paths:
+      - '**.h'
+      - '**.cpp'
+      - '**.c'
+      - '**/CMakeLists.txt'
+      - 'tests/api/**'
+  pull_request:
+    branches:
+      - 'master'
+    paths:
+      - '**.h'
+      - '**.cpp'
+      - '**.c'
+      - '**/CMakeLists.txt'
+      - 'tests/api/**'
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zlib1g-dev
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build library and tests
+        run: cmake --build build --target bowtie2-align-s-lib test_header test_link test_config_init -j$(nproc)
+      - name: Run API tests
+        run: cd build && ctest -R api-test --output-on-failure
+      - name: Build executables (regression check)
+        run: cmake --build build --target bowtie2-align-s bowtie2-build-s -j$(nproc)
+      - name: Smoke test native aligner
+        run: cd build && ./bowtie2-align-s -x ../example/index/lambda_virus ../example/reads/longreads.fq -u 3 --quiet > /dev/null
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # macOS ships with zlib; no install step needed
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build library and tests
+        run: cmake --build build --target bowtie2-align-s-lib test_header test_link test_config_init -j$(sysctl -n hw.ncpu)
+      - name: Run API tests
+        run: cd build && ctest -R api-test --output-on-failure
+      - name: Build executables (regression check)
+        run: cmake --build build --target bowtie2-align-s bowtie2-build-s -j$(sysctl -n hw.ncpu)
+      - name: Smoke test native aligner
+        run: cd build && ./bowtie2-align-s -x ../example/index/lambda_virus ../example/reads/longreads.fq -u 3 --quiet > /dev/null

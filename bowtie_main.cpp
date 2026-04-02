@@ -65,6 +65,7 @@ void check_x86_64_v3(int argc, const char **argv) {
  * per line, and will dispatch each batch of arguments one at a time to
  * bowtie.
  */
+#ifndef BT2_NO_MAIN
 int main(int argc, const char **argv) {
 #ifdef ENABLE_x86_64_v3
 	check_x86_64_v3(argc, argv);
@@ -96,3 +97,4 @@ int main(int argc, const char **argv) {
 		return bowtie(argc, argv);
 	}
 }
+#endif /* BT2_NO_MAIN */
