@@ -150,7 +150,7 @@ typedef struct {
 
     /* Optional SAM tags — NULL if not computed */
     int32_t      *tag_as;     /**< AS:i alignment score. NULL if absent. */
-    int32_t      *tag_xs;     /**< XS:i second-best score. NULL if absent. */
+    int32_t      *tag_xs;     /**< XS:i second-best score. INT32_MIN if absent. */
     int32_t      *tag_nm;     /**< NM:i edit distance. NULL if absent. */
     const char  **tag_md;     /**< MD:Z mismatch string. NULL if absent. */
     const char  **tag_yt;     /**< YT:Z pairing type. NULL if absent. */

@@ -118,8 +118,14 @@ def compare_records(native, api, label):
         sys.exit(1)
 
     fields_to_compare = ["QNAME", "FLAG", "RNAME", "POS", "MAPQ", "CIGAR",
-                         "RNEXT", "PNEXT", "TLEN", "SEQ", "QUAL"]
+                         "RNEXT", "PNEXT", "TLEN"]
+    # SEQ/QUAL: API always emits full data even for secondary alignments,
+    # while native SAM may output "*" when --omit-sec-seq is set.
+    # Compare SEQ/QUAL only when native has actual data (not "*").
+    seq_fields = ["SEQ", "QUAL"]
     tag_fields = ["AS", "NM", "MD", "YT"]
+
+    XS_ABSENT = -2147483648  # INT32_MIN sentinel for absent XS tag
 
     for i in range(len(native)):
         for field in fields_to_compare:
@@ -127,12 +133,21 @@ def compare_records(native, api, label):
                 print(f"FAIL [{label}] record {i} field {field}: "
                       f"native={native[i][field]!r} api={api[i][field]!r}")
                 sys.exit(1)
+        for field in seq_fields:
+            nval = native[i][field]
+            aval = api[i][field]
+            if nval != "*" and nval != aval:
+                print(f"FAIL [{label}] record {i} field {field}: "
+                      f"native={nval!r} api={aval!r}")
+                sys.exit(1)
         for field in tag_fields:
             nval = native[i].get(field)
             aval = api[i].get(field)
-            # Only compare tags when native has them.
-            # Integer tags default to 0 in the API when absent; native has None.
+            # Skip tags absent from native output
             if nval is None:
+                continue
+            # XS: API uses INT32_MIN sentinel for absent; skip if sentinel
+            if field == "XS" and aval == XS_ABSENT:
                 continue
             if nval != aval:
                 print(f"FAIL [{label}] record {i} tag {field}: "

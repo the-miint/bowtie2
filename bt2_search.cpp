@@ -44,6 +44,9 @@
 #include "sequence_io.h"
 #include "tokenize.h"
 #include "aln_sink.h"
+#ifdef BT2_NO_MAIN
+#include "aln_sink_columnar.h"
+#endif
 #include "pat.h"
 #include "threading.h"
 #include "ds.h"
@@ -5116,6 +5119,22 @@ static void driver(
 		// then instruct the sink to "retain" hits in a vector in
 		// memory so that we can easily sanity check them later on
 		AlnSink *mssink = NULL;
+		bool mssink_owned = true; // whether driver() should delete mssink
+#ifdef BT2_NO_MAIN
+		// Library mode: if g_api_columnar_nthreads > 0, create a columnar
+		// sink instead of AlnSinkSam. After bowtie() returns, the caller
+		// retrieves results via g_api_sink pointer.
+		extern int g_api_columnar_nthreads;
+		extern AlnSink *g_api_sink;
+		if(g_api_columnar_nthreads > 0) {
+			mssink = new AlnSinkColumnar(
+				oq, refnames, gQuiet,
+				(size_t)g_api_columnar_nthreads);
+			g_api_sink = mssink;
+			mssink_owned = false; // caller will finalize and free
+		} else
+#endif
+		{
 		switch(outType) {
 		case OUTPUT_SAM: {
 			mssink = new AlnSinkSam(
@@ -5134,6 +5153,7 @@ static void driver(
 		default:
 			cerr << "Invalid output type: " << outType << endl;
 			throw 1;
+		}
 		}
 		if(gVerbose || startVerbose) {
 			cerr << "Dispatching to search driver: "; logTime(cerr, true);
@@ -5210,7 +5230,9 @@ static void driver(
 		assert_eq(oq.numStarted(), oq.numFinished());
 		assert_eq(oq.numStarted(), oq.numFlushed());
 		delete patsrc;
-		delete mssink;
+		if(mssink_owned) {
+			delete mssink;
+		}
 		delete metricsOfb;
 		if(fout != NULL) {
 			delete fout;

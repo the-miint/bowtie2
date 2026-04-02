@@ -299,7 +299,7 @@ set_target_properties(bowtie2-inspect-s PROPERTIES COMPILE_FLAGS "-DBOWTIE_INSPE
 # --- Library targets (reentrant C API) ---
 # BT2_NO_MAIN guards main() in bowtie_main.cpp so the same source list
 # can be used for both executable and library targets.
-set(SEARCH_LIB_CPPS ${SEARCH_CPPS} bt2_api.cpp bt2_sam_parse.cpp)
+set(SEARCH_LIB_CPPS ${SEARCH_CPPS} bt2_api.cpp bt2_sam_parse.cpp aln_sink_columnar.cpp)
 
 add_library(bowtie2-align-s-lib STATIC ${SEARCH_LIB_CPPS} ${SHARED_CPPS})
 add_library(bowtie2-align-l-lib STATIC ${SEARCH_LIB_CPPS} ${SHARED_CPPS})

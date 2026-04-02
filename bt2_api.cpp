@@ -20,6 +20,7 @@
 #include "bt2_api.h"
 #include "bt2_api_internal.h"
 #include "bt2_sam_parse.h"
+#include "aln_sink_columnar.h"
 #include <cinttypes>
 #include <cstring>
 #include <cstdlib>
@@ -31,10 +32,20 @@
 #include <mutex>
 
 extern "C" {
-	int bowtie(int argc, const char **argv);
+	/* noexcept: uncaught C++ exceptions must not cross the C linkage
+	   boundary — that is undefined behavior. std::terminate is the
+	   correct outcome if bowtie's internal try/catch misses something. (#3) */
+	int bowtie(int argc, const char **argv) noexcept;
 }
 
 std::mutex g_bowtie_mutex;
+
+/* Globals for columnar sink injection into driver().
+   When g_api_columnar_nthreads > 0, driver() creates an AlnSinkColumnar
+   and stores it in g_api_sink. Caller retrieves results after bowtie().
+   Protected by g_bowtie_mutex. Phase 4 will eliminate these globals. */
+int g_api_columnar_nthreads = 0;
+AlnSink *g_api_sink = NULL;
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -245,52 +256,45 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
 		argv.push_back(mate1_list.c_str());
 	}
 
-	/* Output to tmpfile (respect TMPDIR for HPC environments) */
-	const char *tmpdir = getenv("TMPDIR");
-	if (!tmpdir || !*tmpdir) tmpdir = "/tmp";
-	char tmppath[4096];
-	snprintf(tmppath, sizeof(tmppath), "%s/bt2_api_XXXXXX", tmpdir);
-	int tmpfd = mkstemp(tmppath);
-	if (tmpfd < 0) {
-		set_last_error(ctx, "Failed to create temporary file");
-		return BT2_ERR_INTERNAL;
-	}
-	close(tmpfd);
-
+	/* Discard SAM text output — we capture results via AlnSinkColumnar.
+	   bowtie() still needs a -S target; use platform null device. (#8) */
 	argv.push_back("-S");
-	argv.push_back(tmppath);
+#ifdef _WIN32
+	argv.push_back("NUL");
+#else
+	argv.push_back("/dev/null");
+#endif
 
-	/* Lock and call bowtie */
+	int sink_nthreads = ctx->config.nthreads > 0 ? ctx->config.nthreads : 1;
+
+	/* Lock, set up columnar sink globals, call bowtie, retrieve results */
 	int rc;
+	bt2_align_output_t *output = NULL;
 	{
 		std::lock_guard<std::mutex> lock(g_bowtie_mutex);
+		g_api_columnar_nthreads = sink_nthreads;
+		g_api_sink = NULL;
+
 		rc = bowtie((int)argv.size(), argv.data());
-	}
 
-	if (rc != 0) {
-		set_last_error(ctx, "bowtie2 alignment returned non-zero exit code");
-		unlink(tmppath);
-		return BT2_ERR_INTERNAL;
-	}
+		/* Retrieve the columnar sink that driver() created */
+		AlnSinkColumnar *col_sink = static_cast<AlnSinkColumnar *>(g_api_sink);
+		g_api_sink = NULL;
+		g_api_columnar_nthreads = 0;
 
-	/* Read SAM output */
-	size_t sam_len = 0;
-	char *sam_text = read_file(tmppath, &sam_len);
-	unlink(tmppath);
+		if (rc != 0 || col_sink == NULL) {
+			delete col_sink;
+			set_last_error(ctx, "bowtie2 alignment returned non-zero exit code");
+			return BT2_ERR_INTERNAL;
+		}
 
-	if (!sam_text) {
-		set_last_error(ctx, "Failed to read alignment output");
-		return BT2_ERR_INTERNAL;
-	}
+		output = col_sink->finalize();
+		delete col_sink;
 
-	/* Parse SAM into output struct */
-	bt2_align_output_t *output = NULL;
-	rc = bt2_parse_sam(sam_text, sam_len, &output);
-	free(sam_text);
-
-	if (rc != BT2_OK) {
-		set_last_error(ctx, "Failed to parse SAM output");
-		return rc;
+		if (!output) {
+			set_last_error(ctx, "Failed to finalize columnar output");
+			return BT2_ERR_NOMEM;
+		}
 	}
 
 	*output_out = output;
