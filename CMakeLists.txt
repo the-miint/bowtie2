@@ -299,7 +299,7 @@ set_target_properties(bowtie2-inspect-s PROPERTIES COMPILE_FLAGS "-DBOWTIE_INSPE
 # --- Library targets (reentrant C API) ---
 # BT2_NO_MAIN guards main() in bowtie_main.cpp so the same source list
 # can be used for both executable and library targets.
-set(SEARCH_LIB_CPPS ${SEARCH_CPPS} bt2_api.cpp bt2_sam_parse.cpp aln_sink_columnar.cpp)
+set(SEARCH_LIB_CPPS ${SEARCH_CPPS} bt2_api.cpp bt2_api_common.cpp bt2_sam_parse.cpp aln_sink_columnar.cpp)
 
 add_library(bowtie2-align-s-lib STATIC ${SEARCH_LIB_CPPS} ${SHARED_CPPS})
 add_library(bowtie2-align-l-lib STATIC ${SEARCH_LIB_CPPS} ${SHARED_CPPS})
@@ -308,6 +308,15 @@ target_compile_definitions(bowtie2-align-l-lib PRIVATE BT2_NO_MAIN BOWTIE_64BIT_
 
 target_include_directories(bowtie2-align-s-lib PUBLIC ${PROJECT_SOURCE_DIR})
 target_include_directories(bowtie2-align-l-lib PUBLIC ${PROJECT_SOURCE_DIR})
+
+# --- Builder library targets (reentrant C API) ---
+set(BUILD_LIB_CPPS ${BUILD_CPPS} bt2_build_api.cpp bt2_api_common.cpp)
+add_library(bowtie2-build-s-lib STATIC ${BUILD_LIB_CPPS} ${SHARED_CPPS})
+add_library(bowtie2-build-l-lib STATIC ${BUILD_LIB_CPPS} ${SHARED_CPPS})
+target_compile_definitions(bowtie2-build-s-lib PRIVATE BT2_BUILD_NO_MAIN BT2_NO_MAIN)
+target_compile_definitions(bowtie2-build-l-lib PRIVATE BT2_BUILD_NO_MAIN BT2_NO_MAIN BOWTIE_64BIT_INDEX)
+target_include_directories(bowtie2-build-s-lib PUBLIC ${PROJECT_SOURCE_DIR})
+target_include_directories(bowtie2-build-l-lib PUBLIC ${PROJECT_SOURCE_DIR})
 
 install(TARGETS ${BOWTIE2_BIN_LIST} DESTINATION bin)
 install(FILES ${BOWTIE2_WRAPPER_SCRIPTS}

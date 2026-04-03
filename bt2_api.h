@@ -291,6 +291,67 @@ const char *bt2_strerror(int error_code);
  */
 const char *bt2_align_last_error(const bt2_align_ctx_t *ctx);
 
+/* ====================================================================
+ * Index Builder API
+ * ==================================================================== */
+
+/* --------------------------------------------------------------------
+ * Opaque builder context
+ * -------------------------------------------------------------------- */
+
+typedef struct bt2_build_ctx bt2_build_ctx_t;
+
+/* --------------------------------------------------------------------
+ * Builder configuration
+ *
+ * struct_size MUST be first field. Call bt2_build_config_init() to
+ * set struct_size and all defaults. New fields appended at end only.
+ * -------------------------------------------------------------------- */
+
+typedef struct {
+    size_t       struct_size;    /**< Set by bt2_build_config_init(). DO NOT set manually. */
+    const char **ref_paths;      /**< Array of reference FASTA file paths. */
+    size_t       n_ref_paths;    /**< Number of reference file paths. */
+    const char  *output_base;    /**< Output index basename (required). */
+    int          nthreads;       /**< Number of threads. Default: 1. */
+    int64_t      seed;           /**< Random seed. Default: 0. */
+    int          offrate;        /**< SA sampling: 1 in 2^N. Default: 4. */
+    int          packed;         /**< Nonzero for packed strings (less RAM). Default: 0. */
+    int          quiet;          /**< Nonzero to suppress verbose output. Default: 1. */
+    bt2_log_fn   log_fn;         /**< Log callback. NULL to discard.
+                                      Captures stderr output only; some build
+                                      progress messages go to stdout. */
+    void        *log_user_data;  /**< Passed to log_fn. */
+} bt2_build_config_t;
+
+/* --------------------------------------------------------------------
+ * Builder statistics — value-only struct, no free needed
+ * -------------------------------------------------------------------- */
+
+typedef struct {
+    int64_t  elapsed_ms;    /**< Wall-clock time in milliseconds. */
+} bt2_build_stats_t;
+
+/* --------------------------------------------------------------------
+ * Builder lifecycle
+ * -------------------------------------------------------------------- */
+
+void bt2_build_config_init(bt2_build_config_t *config);
+
+bt2_build_ctx_t *bt2_build_create(const bt2_build_config_t *config,
+                                  int *error_out);
+
+/**
+ * Build a bowtie2 index. Writes .bt2 files at config->output_base.
+ * @return BT2_OK on success, negative error code on failure.
+ */
+int bt2_build_run(bt2_build_ctx_t *ctx,
+                  bt2_build_stats_t *stats_out);
+
+void bt2_build_destroy(bt2_build_ctx_t *ctx);
+
+const char *bt2_build_last_error(const bt2_build_ctx_t *ctx);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

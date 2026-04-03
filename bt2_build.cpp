@@ -563,6 +563,7 @@ int bowtie_build(int argc, const char **argv) {
 		// Reset all global state, including getopt state
 		opterr = optind = 1;
 		resetOptions();
+		filesWritten.clear(); // prevent stale entries from prior calls
 
 		string infile;
 		EList<string> infiles(MISC_CAT);

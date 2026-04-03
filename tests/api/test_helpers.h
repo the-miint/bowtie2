@@ -38,4 +38,15 @@ static void remove_truncated_index(const char *base) {
     }
 }
 
+/* Remove all 6 .bt2 index files at the given base path. */
+static void cleanup_index(const char *base) {
+    remove_truncated_index(base);  /* same suffixes */
+}
+
+static int file_exists(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (f) { fclose(f); return 1; }
+    return 0;
+}
+
 #endif /* TEST_HELPERS_H */

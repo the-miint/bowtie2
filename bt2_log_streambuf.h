@@ -25,6 +25,8 @@
 
 /**
  * Thread-safe streambuf that routes cerr output to a bt2_log_fn callback.
+ * NOTE: Only std::cerr is redirected, not std::cout. Some bowtie2-build
+ * progress messages go to cout and will not be captured by the callback.
  * All overflow/sync calls are mutex-protected so worker threads that
  * write to cerr (e.g. on error conditions) do not cause data races.
  */
@@ -102,11 +104,16 @@ protected:
  * RAII guard: redirects cerr to a LogCallbackStreambuf (or NullStreambuf)
  * for the duration of its lifetime. Restores the original streambuf
  * on destruction (including exception unwind).
+ *
+ * Uses a shared static mutex (g_cerr_redirect_mtx_) to prevent
+ * concurrent cerr redirection from aligner and builder paths.
  */
 class CerrRedirectGuard {
 public:
 	CerrRedirectGuard(bt2_log_fn fn, void *user_data, bool quiet)
-		: orig_(std::cerr.rdbuf()) {
+		: owns_lock_(true) {
+		g_cerr_redirect_mtx_.lock();
+		orig_ = std::cerr.rdbuf();
 		if (fn) {
 			buf_.reset(new LogCallbackStreambuf(fn, user_data));
 			std::cerr.rdbuf(buf_.get());
@@ -118,15 +125,18 @@ public:
 
 	~CerrRedirectGuard() {
 		std::cerr.rdbuf(orig_);
+		if (owns_lock_) g_cerr_redirect_mtx_.unlock();
 	}
 
 	CerrRedirectGuard(const CerrRedirectGuard&) = delete;
 	CerrRedirectGuard& operator=(const CerrRedirectGuard&) = delete;
 
 private:
+	static std::mutex g_cerr_redirect_mtx_;
 	std::streambuf *orig_;
 	std::unique_ptr<LogCallbackStreambuf> buf_;
 	std::unique_ptr<NullStreambuf> null_buf_;
+	bool owns_lock_;
 };
 
 #endif /* BT2_LOG_STREAMBUF_H */

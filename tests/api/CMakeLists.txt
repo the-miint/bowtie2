@@ -52,6 +52,32 @@ add_api_test(test_error_no_exit)
 add_api_test(test_error_recovery)
 add_api_test(test_log_callback)
 
+# Phase 6 tests — index builder API (link against build library)
+macro(add_build_api_test name)
+  add_executable(${name} ${name}.c)
+  target_link_libraries(${name} bowtie2-build-s-lib)
+  set_target_properties(${name} PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON)
+  add_test(NAME api-${name}
+    COMMAND ${name}
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+endmacro()
+
+add_build_api_test(test_build_header)
+add_build_api_test(test_build_config_init)
+add_build_api_test(test_build_basic)
+add_build_api_test(test_build_error)
+add_build_api_test(test_build_context_reuse)
+add_build_api_test(test_build_log_callback)
+
+# api_build helper (used by Python build comparison test)
+add_executable(api_build api_build.c)
+target_link_libraries(api_build bowtie2-build-s-lib)
+set_target_properties(api_build PROPERTIES
+  C_STANDARD 11
+  C_STANDARD_REQUIRED ON)
+
 # Python correctness comparison tests
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_FOUND)
@@ -66,4 +92,10 @@ if (Python3_FOUND)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(api-test-input-memory-vs-file PROPERTIES
     DEPENDS "api-test_input_memory")
+
+  add_test(NAME api-test-build-vs-native
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_build_vs_native.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(api-test-build-vs-native PROPERTIES
+    DEPENDS "api-test_build_basic")
 endif()

@@ -40,6 +40,7 @@ extern "C" {
  * per line, and will dispatch each batch of arguments one at a time to
  * bowtie-build.
  */
+#ifndef BT2_BUILD_NO_MAIN
 int main(int argc, const char **argv) {
 	if(argc > 2 && strcmp(argv[1], "-A") == 0) {
 		const char *file = argv[2];
@@ -68,3 +69,4 @@ int main(int argc, const char **argv) {
 		return bowtie_build(argc, argv);
 	}
 }
+#endif /* BT2_BUILD_NO_MAIN */

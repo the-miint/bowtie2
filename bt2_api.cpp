@@ -35,10 +35,7 @@
 #include <mutex>
 
 extern "C" {
-	/* noexcept: uncaught C++ exceptions must not cross the C linkage
-	   boundary — that is undefined behavior. std::terminate is the
-	   correct outcome if bowtie's internal try/catch misses something. (#3) */
-	int bowtie(int argc, const char **argv) noexcept;
+	int bowtie(int argc, const char **argv);
 }
 
 std::mutex g_bowtie_mutex;
@@ -124,18 +121,7 @@ void bt2_align_config_init(bt2_align_config_t *config) {
 }
 
 /* ---- Error reporting ----------------------------------------------- */
-
-const char *bt2_strerror(int error_code) {
-	switch (error_code) {
-		case BT2_OK:                 return "Success";
-		case BT2_ERR_NOMEM:          return "Out of memory";
-		case BT2_ERR_INVALID_CONFIG: return "Invalid configuration";
-		case BT2_ERR_INDEX:          return "Index error";
-		case BT2_ERR_INPUT:          return "Input error";
-		case BT2_ERR_INTERNAL:       return "Internal error";
-		default:                     return "Unknown error";
-	}
-}
+/* bt2_strerror() is in bt2_api_common.cpp (shared with builder library) */
 
 const char *bt2_align_last_error(const bt2_align_ctx_t *ctx) {
 	if (!ctx) return "";
@@ -393,6 +379,12 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 	}
 
 	ctx->last_error[0] = '\0';
+
+	/* Validate seed range — bowtie internally uses int */
+	if (ctx->config.seed < 0 || ctx->config.seed > INT32_MAX) {
+		set_last_error(ctx, "seed must be between 0 and 2147483647");
+		return BT2_ERR_INVALID_CONFIG;
+	}
 
 	auto t_start = std::chrono::steady_clock::now();
 
