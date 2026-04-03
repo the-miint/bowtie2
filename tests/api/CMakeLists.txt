@@ -44,6 +44,9 @@ set_target_properties(api_dump_memory PROPERTIES
   C_STANDARD 11
   C_STANDARD_REQUIRED ON)
 
+# Phase 4 tests — direct driver path (no temp files)
+add_api_test(test_direct_no_tempfile)
+
 # Python correctness comparison tests
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_FOUND)

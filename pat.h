@@ -340,7 +340,50 @@ private:
 	bool paired_;			   // whether reads are paired
 	EList<string> tokbuf_;	   // buffer for storing parsed tokens
 	EList<Read::TBuf> bufs_;   // per-read buffers
-	char nametmp_[20];		   // temp buffer for constructing name
+	char nametmp_[21];		   // temp buffer for constructing name (20 digits + NUL)
+};
+
+/**
+ * Encapsulates a source of patterns from in-memory arrays.
+ * Used by the C API (bt2_align_run) to pass reads directly without
+ * writing temporary FASTQ files. Follows VectorPatternSource's
+ * buffer format: tab-separated name\tseq\tqual per read.
+ */
+class MemoryPatternSource : public PatternSource {
+
+public:
+
+	MemoryPatternSource(
+		const char **names,
+		const char **seqs,
+		const char **quals,
+		size_t n_reads,
+		const PatternParams& p);
+
+	virtual ~MemoryPatternSource() { }
+
+	virtual std::pair<bool, int> nextBatch(
+		PerThreadReadBuf& pt,
+		bool batch_a,
+		bool lock = false);
+
+	virtual void reset() {
+		PatternSource::reset();
+		cur_ = skip_;
+	}
+
+	virtual bool parse(Read& ra, Read& rb, TReadId rdid) const;
+
+private:
+
+	pair<bool, int> nextBatchImpl(
+		PerThreadReadBuf& pt,
+		bool batch_a);
+
+	size_t cur_;
+	size_t skip_;
+	EList<Read::TBuf> bufs_;
+	char nametmp_[20];
 };
 
 /**

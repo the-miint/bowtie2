@@ -774,6 +774,155 @@ bool VectorPatternSource::parse(Read& ra, Read& rb, TReadId rdid) const {
 }
 
 /**
+ * Construct MemoryPatternSource from in-memory arrays.
+ * Pre-formats reads into bufs_ as tab-separated name\tseq\tqual,
+ * matching VectorPatternSource's buffer format so parse() can reuse
+ * the same logic.
+ */
+MemoryPatternSource::MemoryPatternSource(
+	const char **names,
+	const char **seqs,
+	const char **quals,
+	size_t n_reads,
+	const PatternParams& p) :
+	PatternSource(p),
+	cur_(p.skip),
+	skip_(p.skip),
+	bufs_()
+{
+	for(size_t i = 0; i < n_reads; i++) {
+		bufs_.expand();
+		bufs_.back().clear();
+		// Install name
+		if(names && names[i]) {
+			bufs_.back().install(names[i]);
+		} else {
+			itoa10<TReadId>(static_cast<TReadId>(i), nametmp_);
+			bufs_.back().install(nametmp_);
+		}
+		bufs_.back().append('\t');
+		// Install sequence
+		bufs_.back().append(seqs[i]);
+		bufs_.back().append('\t');
+		// Install qualities
+		if(quals && quals[i]) {
+			bufs_.back().append(quals[i]);
+		} else {
+			const size_t len = strlen(seqs[i]);
+			for(size_t j = 0; j < len; j++) {
+				bufs_.back().append('I');
+			}
+		}
+	}
+}
+
+pair<bool, int> MemoryPatternSource::nextBatchImpl(
+	PerThreadReadBuf& pt,
+	bool batch_a)
+{
+	pt.setReadId(cur_);
+	EList<Read>& readbuf = batch_a ? pt.bufa_ : pt.bufb_;
+	size_t readi = 0;
+	for(; readi < pt.max_buf_ && cur_ < bufs_.size(); readi++, cur_++) {
+		readbuf[readi].readOrigBuf = bufs_[cur_];
+	}
+	readCnt_ += readi;
+	return make_pair(cur_ == bufs_.size(), readi);
+}
+
+pair<bool, int> MemoryPatternSource::nextBatch(
+	PerThreadReadBuf& pt,
+	bool batch_a,
+	bool lock)
+{
+	if(lock) {
+		ThreadSafe ts(mutex);
+		return nextBatchImpl(pt, batch_a);
+	} else {
+		return nextBatchImpl(pt, batch_a);
+	}
+}
+
+/**
+ * Parse a read from the tab-separated buffer. Reuses VectorPatternSource's
+ * parse logic (name\tseq\tqual format).
+ */
+bool MemoryPatternSource::parse(Read& ra, Read& rb, TReadId rdid) const {
+	assert(ra.empty());
+	assert(!ra.readOrigBuf.empty());
+	int c = '\t';
+	size_t cur = 0;
+	const size_t buflen = ra.readOrigBuf.length();
+
+	// Single-end only (paired is handled by DualPatternComposer)
+	Read& r = ra;
+	assert(r.name.empty());
+	// Parse read name
+	c = ra.readOrigBuf[cur++];
+	while(c != '\t' && cur < buflen) {
+		r.name.append(c);
+		c = ra.readOrigBuf[cur++];
+	}
+	assert_eq('\t', c);
+	if(cur >= buflen) {
+		return false;
+	}
+
+	// Parse sequence
+	assert(r.patFw.empty());
+	c = ra.readOrigBuf[cur++];
+	int nchar = 0;
+	while(c != '\t' && cur < buflen) {
+		if(isalpha(c)) {
+			assert_in(toupper(c), "ACGTN");
+			if(nchar++ >= pp_.trim5) {
+				assert_neq(0, asc2dnacat[c]);
+				r.patFw.append(asc2dna[c]);
+			}
+		}
+		c = ra.readOrigBuf[cur++];
+	}
+	assert_eq('\t', c);
+	if(cur >= buflen) {
+		return false;
+	}
+	r.trimmed5 = (int)(nchar - r.patFw.length());
+	r.trimmed3 = (int)(r.patFw.trimEnd(pp_.trim3));
+
+	// Parse qualities
+	assert(r.qual.empty());
+	c = ra.readOrigBuf[cur++];
+	int nqual = 0;
+	while(c != '\t' && c != '\n' && c != '\r') {
+		if(c == ' ') {
+			wrongQualityFormat(r.name);
+			return false;
+		}
+		char cadd = charToPhred33(c, false, false);
+		if(++nqual > pp_.trim5) {
+			r.qual.append(cadd);
+		}
+		if(cur >= buflen) break;
+		c = ra.readOrigBuf[cur++];
+	}
+	if(nchar > nqual) {
+		tooFewQualities(r.name);
+		return false;
+	} else if(nqual > nchar) {
+		tooManyQualities(r.name);
+		return false;
+	}
+	r.qual.trimEnd(pp_.trim3);
+	assert_eq(r.patFw.length(), r.qual.length());
+
+	ra.parsed = true;
+	if(!rb.parsed && !rb.readOrigBuf.empty()) {
+		return parse(rb, ra, rdid);
+	}
+	return true;
+}
+
+/**
  * Light-parse a FASTA batch into the given buffer.
  */
 pair<bool, int> FastaPatternSource::nextBatchFromFile(

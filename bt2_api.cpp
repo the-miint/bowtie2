@@ -19,14 +19,14 @@
 
 #include "bt2_api.h"
 #include "bt2_api_internal.h"
-#include "bt2_sam_parse.h"
+#include "bt2_driver_api.h"
 #include "aln_sink_columnar.h"
+#include "pat.h"
+#include "formats.h"
 #include <cinttypes>
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
-#include <climits>
-#include <unistd.h>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -43,20 +43,21 @@ std::mutex g_bowtie_mutex;
 
 /* Globals for columnar sink injection into driver().
    When g_api_columnar_nthreads > 0, driver() creates an AlnSinkColumnar
-   and stores it in g_api_sink. Caller retrieves results after bowtie().
-   Protected by g_bowtie_mutex. Phase 4 will eliminate these globals. */
+   and stores it in g_api_sink. Caller retrieves results after driver().
+   Protected by g_bowtie_mutex. Still needed because AlnSinkColumnar
+   requires OutputQueue, which is stack-local inside driver(). */
 int g_api_columnar_nthreads = 0;
 AlnSink *g_api_sink = NULL;
 
 /* ---- Helpers -------------------------------------------------------- */
 
 static bool index_files_exist(const char *base) {
-	/* Probe for .1.bt2 (small index) or .1.bt2l (large index) */
+	/* Probe for .1.bt2 (small index) or .1.bt2l (large index).
+	   Uses bt2_index_is_large() for the large probe to keep detection
+	   logic in one place. */
+	if (bt2_index_is_large(base)) return true;
 	std::string probe_s = std::string(base) + ".1.bt2";
-	std::string probe_l = std::string(base) + ".1.bt2l";
 	FILE *f = fopen(probe_s.c_str(), "r");
-	if (f) { fclose(f); return true; }
-	f = fopen(probe_l.c_str(), "r");
 	if (f) { fclose(f); return true; }
 	return false;
 }
@@ -337,46 +338,6 @@ void bt2_input_init(bt2_input_t *input) {
 
 /* ---- In-memory alignment ------------------------------------------- */
 
-/* Write reads to a temporary FASTQ file. Returns 0 on success, -1 on error.
-   Validates that quality string lengths match sequence lengths when provided. */
-static int write_temp_fastq(const char **names, const char **seqs,
-                            const char **quals, size_t n_reads,
-                            char *path_buf, size_t path_buf_size) {
-	const char *tmpdir = getenv("TMPDIR");
-	if (!tmpdir || tmpdir[0] == '\0') tmpdir = "/tmp";
-	snprintf(path_buf, path_buf_size, "%s/bt2_api_XXXXXX", tmpdir);
-	int fd = mkstemp(path_buf);
-	if (fd < 0) return -1;
-
-	FILE *f = fdopen(fd, "w");
-	if (!f) { close(fd); unlink(path_buf); return -1; }
-
-	int err = 0;
-	for (size_t i = 0; i < n_reads; i++) {
-		const char *name = (names && names[i]) ? names[i] : "read";
-		const char *seq  = seqs[i];
-		if (!seq || seq[0] == '\0') { err = -1; break; }
-		size_t seq_len = strlen(seq);
-
-		if (fprintf(f, "@%s\n%s\n+\n", name, seq) < 0) { err = -1; break; }
-		if (quals && quals[i]) {
-			if (strlen(quals[i]) != seq_len) { err = -1; break; }
-			if (fprintf(f, "%s\n", quals[i]) < 0) { err = -1; break; }
-		} else {
-			/* Default quality: 'I' (Phred+33 = 40) for each base */
-			for (size_t j = 0; j < seq_len; j++) {
-				if (fputc('I', f) == EOF) { err = -1; break; }
-			}
-			if (err) break;
-			if (fputc('\n', f) == EOF) { err = -1; break; }
-		}
-	}
-
-	if (fclose(f) != 0) err = -1;
-	if (err) { unlink(path_buf); return -1; }
-	return 0;
-}
-
 int bt2_align_run(bt2_align_ctx_t *ctx,
                   const bt2_input_t *input,
                   bt2_align_output_t **output_out,
@@ -426,40 +387,135 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 
 	ctx->last_error[0] = '\0';
 
-	/* Write reads to temporary FASTQ file(s) */
-	char mate1_path[PATH_MAX];
-	char mate2_path[PATH_MAX];
-	mate1_path[0] = '\0';
-	mate2_path[0] = '\0';
+	auto t_start = std::chrono::steady_clock::now();
 
-	if (write_temp_fastq(input->names, input->seqs, input->quals,
-	                     input->n_reads, mate1_path, sizeof(mate1_path)) != 0) {
-		set_last_error(ctx, "Failed to write temporary FASTQ for mate 1");
-		return BT2_ERR_INPUT;
-	}
+	int sink_nthreads = ctx->config.nthreads > 0 ? ctx->config.nthreads : 1;
+	bt2_align_output_t *output = NULL;
 
-	if (paired) {
-		if (write_temp_fastq(input->names2, input->seqs2, input->quals2,
-		                     input->n_reads2, mate2_path, sizeof(mate2_path)) != 0) {
-			unlink(mate1_path);
-			set_last_error(ctx, "Failed to write temporary FASTQ for mate 2");
-			return BT2_ERR_INPUT;
+	{
+		std::lock_guard<std::mutex> lock(g_bowtie_mutex);
+
+		/* Set statics from API config */
+		apply_config_to_statics(ctx->config.nthreads, ctx->config.seed,
+		                        ctx->config.quiet, ctx->config.preset,
+		                        ctx->config.local_align);
+
+		/* Build PatternParams for MemoryPatternSource */
+		PatternParams pp(
+			CMDLINE,       /* format: command-line sequences (tab-separated internally) */
+			false,         /* interleaved */
+			false,         /* fileParallel */
+			(uint32_t)ctx->config.seed,
+			1024,          /* max_buf (reads per batch) */
+			false,         /* solexa64 */
+			false,         /* phred64 */
+			false,         /* intQuals */
+			0,             /* trim5 */
+			0,             /* trim3 */
+			make_pair((short)0, (size_t)0), /* trimTo */
+			0,             /* sampleLen */
+			0,             /* sampleFreq */
+			0,             /* skip */
+			(uint64_t)-1,  /* upto (no limit) */
+			sink_nthreads, /* nthreads */
+			false,         /* fixName */
+			false,         /* preserve_tags */
+			false          /* align_paired_reads */
+		);
+
+		/* Create MemoryPatternSource(s) and PatternComposer */
+		PatternComposer *patsrc = NULL;
+		if (paired) {
+			EList<PatternSource*> *srca = new EList<PatternSource*>();
+			EList<PatternSource*> *srcb = new EList<PatternSource*>();
+			srca->push_back(new MemoryPatternSource(
+				input->names, input->seqs, input->quals,
+				input->n_reads, pp));
+			srcb->push_back(new MemoryPatternSource(
+				input->names2, input->seqs2, input->quals2,
+				input->n_reads2, pp));
+			patsrc = new DualPatternComposer(srca, srcb, pp);
+		} else {
+			EList<PatternSource*> *src = new EList<PatternSource*>();
+			src->push_back(new MemoryPatternSource(
+				input->names, input->seqs, input->quals,
+				input->n_reads, pp));
+			patsrc = new SoloPatternComposer(src, pp);
+		}
+
+		/* Tell driver() to create a columnar sink (it needs the OutputQueue
+		   which is stack-local inside driver). Phase 4 REFACTOR will
+		   eventually move OutputQueue creation out of driver(). */
+		g_api_columnar_nthreads = sink_nthreads;
+		g_api_sink = NULL;
+
+		const char *nulldev =
+#ifdef _WIN32
+			"NUL";
+#else
+			"/dev/null";
+#endif
+		try {
+			if (bt2_index_is_large(ctx->config.index_path)) {
+				driver_api_large(ctx->config.index_path, nulldev,
+				                 patsrc, NULL);
+			} else {
+				driver_api_small(ctx->config.index_path, nulldev,
+				                 patsrc, NULL);
+			}
+		} catch (...) {
+			g_api_columnar_nthreads = 0;
+			delete static_cast<AlnSinkColumnar *>(g_api_sink);
+			g_api_sink = NULL;
+			delete patsrc;
+			set_last_error(ctx, "bowtie2 driver threw an exception");
+			return BT2_ERR_INTERNAL;
+		}
+
+		/* Retrieve the columnar sink that driver() created */
+		AlnSinkColumnar *col_sink = static_cast<AlnSinkColumnar *>(g_api_sink);
+		g_api_sink = NULL;
+		g_api_columnar_nthreads = 0;
+
+		if (!col_sink) {
+			delete patsrc;
+			set_last_error(ctx, "No columnar sink after driver()");
+			return BT2_ERR_INTERNAL;
+		}
+
+		output = col_sink->finalize();
+		delete col_sink;
+		delete patsrc;
+
+		if (!output) {
+			set_last_error(ctx, "Failed to finalize columnar output");
+			return BT2_ERR_NOMEM;
 		}
 	}
 
-	/* Delegate to file-based alignment */
-	const char *m1[] = { mate1_path };
-	const char *m2[] = { mate2_path };
-	int rc = bt2_align_run_files(ctx, m1, 1,
-	                             paired ? m2 : NULL,
-	                             paired ? 1 : 0,
-	                             output_out, stats_out);
+	*output_out = output;
 
-	/* Clean up temp files */
-	unlink(mate1_path);
-	if (paired) unlink(mate2_path);
+	if (stats_out) {
+		memset(stats_out, 0, sizeof(*stats_out));
+		int64_t n_records = (int64_t)output->n_records;
+		int64_t aligned = 0;
+		int64_t concordant = 0;
+		for (size_t i = 0; i < output->n_records; i++) {
+			int32_t f = output->flag[i];
+			if (!(f & 0x4)) aligned++;
+			if ((f & 0x2) && (f & 0x40)) concordant++;
+		}
+		stats_out->n_reads = n_records;
+		stats_out->n_aligned = aligned;
+		stats_out->n_unaligned = n_records - aligned;
+		stats_out->n_aligned_concordant = concordant;
 
-	return rc;
+		auto t_end = std::chrono::steady_clock::now();
+		auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
+		stats_out->elapsed_ms = (int64_t)ms;
+	}
+
+	return BT2_OK;
 }
 
 void bt2_align_output_free(bt2_align_output_t *output) {

@@ -62,6 +62,7 @@
 #include "pe.h"
 #include "simple_func.h"
 #include "presets.h"
+#include "bt2_driver_api.h"
 #include "opts.h"
 #include "outq.h"
 #include "aligner_seed2.h"
@@ -4919,7 +4920,9 @@ template<typename TStr>
 static void driver(
 	const char * type,
 	const string& bt2indexBase,
-	const string& outfile)
+	const string& outfile,
+	PatternComposer *api_patsrc = NULL,
+	AlnSink *api_sink = NULL)
 {
 	if(gVerbose || startVerbose)  {
 		cerr << "Entered driver(): "; logTime(cerr, true);
@@ -4958,19 +4961,27 @@ static void driver(
 	if(gVerbose || startVerbose) {
 		cerr << "Creating PatternSource: "; logTime(cerr, true);
 	}
-	PatternComposer *patsrc = PatternComposer::setupPatternComposer(
-		queries,     // singles, from argv
-		mates1,      // mate1's, from -1 arg
-		mates2,      // mate2's, from -2 arg
-		mates12,     // both mates on each line, from --12 arg
-		qualities,   // qualities associated with singles
-		qualities1,  // qualities associated with m1
-		qualities2,  // qualities associated with m2
+	PatternComposer *patsrc;
+	bool patsrc_owned;
+	if(api_patsrc != NULL) {
+		patsrc = api_patsrc;
+		patsrc_owned = false;
+	} else {
+		patsrc = PatternComposer::setupPatternComposer(
+			queries,     // singles, from argv
+			mates1,      // mate1's, from -1 arg
+			mates2,      // mate2's, from -2 arg
+			mates12,     // both mates on each line, from --12 arg
+			qualities,   // qualities associated with singles
+			qualities1,  // qualities associated with m1
+			qualities2,  // qualities associated with m2
 #ifdef USE_SRA
-		sra_accs,    // SRA accessions
+			sra_accs,    // SRA accessions
 #endif
-		pp,          // read read-in parameters
-		gVerbose || startVerbose); // be talkative
+			pp,          // read read-in parameters
+			gVerbose || startVerbose); // be talkative
+		patsrc_owned = true;
+	}
 	// Open hit output file
 	if(gVerbose || startVerbose) {
 		cerr << "Opening hit output file: "; logTime(cerr, true);
@@ -5120,19 +5131,26 @@ static void driver(
 		// memory so that we can easily sanity check them later on
 		AlnSink *mssink = NULL;
 		bool mssink_owned = true; // whether driver() should delete mssink
+		if(api_sink != NULL) {
+			// Direct API path: caller provides the sink
+			mssink = api_sink;
+			mssink_owned = false;
+		}
 #ifdef BT2_NO_MAIN
-		// Library mode: if g_api_columnar_nthreads > 0, create a columnar
-		// sink instead of AlnSinkSam. After bowtie() returns, the caller
-		// retrieves results via g_api_sink pointer.
-		extern int g_api_columnar_nthreads;
-		extern AlnSink *g_api_sink;
-		if(g_api_columnar_nthreads > 0) {
-			mssink = new AlnSinkColumnar(
-				oq, refnames, gQuiet,
-				(size_t)g_api_columnar_nthreads);
-			g_api_sink = mssink;
-			mssink_owned = false; // caller will finalize and free
-		} else
+		// Library mode via bowtie(): g_api_columnar_nthreads > 0 means
+		// create a columnar sink. Caller retrieves via g_api_sink.
+		else {
+			extern int g_api_columnar_nthreads;
+			extern AlnSink *g_api_sink;
+			if(g_api_columnar_nthreads > 0) {
+				mssink = new AlnSinkColumnar(
+					oq, refnames, gQuiet,
+					(size_t)g_api_columnar_nthreads);
+				g_api_sink = mssink;
+				mssink_owned = false;
+			}
+		}
+		if(mssink == NULL)
 #endif
 		{
 		switch(outType) {
@@ -5229,7 +5247,9 @@ static void driver(
 		oq.flush(true);
 		assert_eq(oq.numStarted(), oq.numFinished());
 		assert_eq(oq.numStarted(), oq.numFlushed());
-		delete patsrc;
+		if(patsrc_owned) {
+			delete patsrc;
+		}
 		if(mssink_owned) {
 			delete mssink;
 		}
@@ -5238,6 +5258,97 @@ static void driver(
 			delete fout;
 		}
 	}
+}
+
+// --- driver_api wrappers for bt2_api.cpp direct calls ---
+
+/*
+ * Set statics from API config by synthesizing a minimal argv and calling
+ * parseOptions(). This ensures preset scoring/seed policies are correctly
+ * applied through the same code path as normal bowtie2 invocation.
+ *
+ * NOTE: If you add new options to parseOptions(), verify that the
+ * synthetic argv here still produces correct behavior for the API path.
+ * The -x placeholder is required by parseOptions but ignored — driver()
+ * receives the real index path as a parameter.
+ */
+void apply_config_to_statics(int api_nthreads, int64_t api_seed, int api_quiet,
+                             int api_preset, int api_local_align) {
+	// Reset getopt state and all statics
+	opterr = optind = 1;
+	resetOptions();
+
+	// argv0 is used by adjustEbwtBase() — set if not already set
+	if(argv0 == NULL) {
+		argv0 = "bowtie2";
+	}
+
+	// Build a minimal argv and call parseOptions() to correctly set
+	// all statics including preset scoring/seed policies.
+	// No -c or input args — the injected PatternComposer provides reads.
+	std::vector<const char *> argv;
+	argv.push_back("bowtie2");
+	argv.push_back("-x");
+	argv.push_back("dummy"); // placeholder — driver() gets the real index
+
+	// Preset
+	const char *preset_flag = NULL;
+	switch(api_preset) {
+		case 0: preset_flag = api_local_align ? "--very-fast-local" : "--very-fast"; break;
+		case 1: preset_flag = api_local_align ? "--fast-local" : "--fast"; break;
+		case 2: preset_flag = api_local_align ? "--sensitive-local" : "--sensitive"; break;
+		case 3: preset_flag = api_local_align ? "--very-sensitive-local" : "--very-sensitive"; break;
+		default: preset_flag = api_local_align ? "--sensitive-local" : "--sensitive"; break;
+	}
+	argv.push_back(preset_flag);
+
+	// Threads
+	char threads_buf[32];
+	snprintf(threads_buf, sizeof(threads_buf), "%d", api_nthreads > 0 ? api_nthreads : 1);
+	argv.push_back("-p");
+	argv.push_back(threads_buf);
+
+	// Seed
+	char seed_buf[32];
+	snprintf(seed_buf, sizeof(seed_buf), "%lld", (long long)api_seed);
+	argv.push_back("--seed");
+	argv.push_back(seed_buf);
+
+	// Quiet
+	if(api_quiet) {
+		argv.push_back("--quiet");
+	}
+
+	// Reorder for reproducible output
+	argv.push_back("--reorder");
+
+	// Parse all options — this correctly applies presets, scoring policies, etc.
+	parseOptions((int)argv.size(), argv.data());
+}
+
+void driver_api_small(
+	const std::string& bt2indexBase,
+	const std::string& outfile,
+	PatternComposer *api_patsrc,
+	AlnSink *api_sink)
+{
+	driver<uint32_t>("small", bt2indexBase, outfile, api_patsrc, api_sink);
+}
+
+void driver_api_large(
+	const std::string& bt2indexBase,
+	const std::string& outfile,
+	PatternComposer *api_patsrc,
+	AlnSink *api_sink)
+{
+	driver<uint64_t>("large", bt2indexBase, outfile, api_patsrc, api_sink);
+}
+
+bool bt2_index_is_large(const std::string& base) {
+	std::string probe = base + ".1.bt2l";
+	FILE *f = fopen(probe.c_str(), "r");
+	if(f) { fclose(f); return true; }
+	return false;
 }
 
 // C++ name mangling is disabled for the bowtie() function to make it
