@@ -19,7 +19,9 @@
 
 #include "bt2_api.h"
 #include "bt2_api_internal.h"
+#include "bt2_api_exception.h"
 #include "bt2_driver_api.h"
+#include "bt2_log_streambuf.h"
 #include "aln_sink_columnar.h"
 #include "pat.h"
 #include "formats.h"
@@ -231,8 +233,10 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
 	argv.push_back("--seed");
 	argv.push_back(seed_buf);
 
-	/* Quiet */
-	if (ctx->config.quiet) {
+	/* Quiet — when log_fn is set, force quiet=0 so alignment summary
+	   is produced and captured by the cerr redirect. */
+	int effective_quiet = (ctx->config.log_fn != NULL) ? 0 : ctx->config.quiet;
+	if (effective_quiet) {
 		argv.push_back("--quiet");
 	}
 
@@ -274,6 +278,9 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
 	bt2_align_output_t *output = NULL;
 	{
 		std::lock_guard<std::mutex> lock(g_bowtie_mutex);
+		CerrRedirectGuard cerr_guard(ctx->config.log_fn,
+		                             ctx->config.log_user_data,
+		                             ctx->config.quiet);
 		g_api_columnar_nthreads = sink_nthreads;
 		g_api_sink = NULL;
 
@@ -395,9 +402,19 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 	{
 		std::lock_guard<std::mutex> lock(g_bowtie_mutex);
 
+		/* Redirect cerr to log callback (or discard if quiet + no callback) */
+		CerrRedirectGuard cerr_guard(ctx->config.log_fn,
+		                             ctx->config.log_user_data,
+		                             ctx->config.quiet);
+
+		/* When log_fn is set, force quiet=0 so alignment summary is
+		   produced (the CerrRedirectGuard captures it for the callback).
+		   When log_fn is NULL, respect the quiet setting. */
+		int effective_quiet = (ctx->config.log_fn != NULL) ? 0 : ctx->config.quiet;
+
 		/* Set statics from API config */
 		apply_config_to_statics(ctx->config.nthreads, ctx->config.seed,
-		                        ctx->config.quiet, ctx->config.preset,
+		                        effective_quiet, ctx->config.preset,
 		                        ctx->config.local_align);
 
 		/* Build PatternParams for MemoryPatternSource */
@@ -463,6 +480,20 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 				driver_api_small(ctx->config.index_path, nulldev,
 				                 patsrc, NULL);
 			}
+		} catch (const Bt2ApiException& e) {
+			g_api_columnar_nthreads = 0;
+			delete static_cast<AlnSinkColumnar *>(g_api_sink);
+			g_api_sink = NULL;
+			delete patsrc;
+			set_last_error(ctx, e.what());
+			return e.error_code;
+		} catch (const std::bad_alloc&) {
+			g_api_columnar_nthreads = 0;
+			delete static_cast<AlnSinkColumnar *>(g_api_sink);
+			g_api_sink = NULL;
+			delete patsrc;
+			set_last_error(ctx, "Out of memory during alignment");
+			return BT2_ERR_NOMEM;
 		} catch (...) {
 			g_api_columnar_nthreads = 0;
 			delete static_cast<AlnSinkColumnar *>(g_api_sink);

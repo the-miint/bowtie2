@@ -22,11 +22,18 @@
 
 #include <stdint.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstring>
 #include <iostream>
 #include <fstream>
+#include <string>
 #include "assert_helpers.h"
 #include "endian_swap.h"
 #include "btypes.h"
+#ifdef BT2_NO_MAIN
+#include "bt2_api.h"
+#include "bt2_api_exception.h"
+#endif
 
 /**
  * Write a 32/64 bit unsigned to an output stream being careful to
@@ -122,8 +129,13 @@ template <typename T>
 static inline T readU(FILE* in, bool swap) {
 	T x;
 	if(fread((void *)&x, sizeof(T), 1, in) != 1) {
+#ifdef BT2_NO_MAIN
+		std::string msg = std::string("readU: ") + strerror(errno);
+		throw Bt2ApiException(BT2_ERR_INDEX, msg);
+#else
 		perror("readU");
 		exit(1);
+#endif
 	}
 	if(swap) {
 		if(sizeof(T) == 4) {
@@ -193,8 +205,13 @@ template <typename T>
 static inline T readI(FILE* in, bool swap) {
 	T x;
 	if(fread((void *)&x, sizeof(T), 1, in) != 1) {
+#ifdef BT2_NO_MAIN
+		std::string msg = std::string("readI: ") + strerror(errno);
+		throw Bt2ApiException(BT2_ERR_INDEX, msg);
+#else
 		perror("readI");
 		exit(1);
+#endif
 	}
 	if(swap) {
 		if(sizeof(T) == 4) {

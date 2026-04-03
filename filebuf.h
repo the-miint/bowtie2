@@ -24,6 +24,8 @@
 #include <fstream>
 #include <string>
 #include <condition_variable>
+#include <exception>
+#include <stdexcept>
 #include <thread>
 #include <stdio.h>
 #include <string.h>
@@ -678,6 +680,18 @@ public:
 		close();
 		asyncData_.notifyAbort();
 		asynct_.join();
+		/* Propagate async thread errors — but not in destructor
+		   (throwing from destructor is UB during stack unwind).
+		   Log and swallow instead. */
+		if(asyncData_.async_exception) {
+			try {
+				std::rethrow_exception(asyncData_.async_exception);
+			} catch(const std::exception& e) {
+				std::fprintf(stderr, "OutFileBuf async error: %s\n", e.what());
+			} catch(...) {
+				std::fprintf(stderr, "OutFileBuf async error (unknown)\n");
+			}
+		}
 		delete[] buf2_;
 		delete[] buf1_;
 	}
@@ -768,6 +782,7 @@ public:
 		if(closed_) return;
 		if(cur_ > 0) flush();
 		asyncData_.waitIdle();
+		asyncData_.checkAsyncError(); /* propagate async thread errors */
 		closed_ = true;
 		if(out_ != stdout) {
 			fclose(out_);
@@ -900,8 +915,12 @@ private:
 		std::mutex m;
 		std::condition_variable cv;
 
+		bool epipe_occurred;           // set by writeAsync on EPIPE
+		std::exception_ptr async_exception; // propagates async errors to caller
+
 		// m and cv default constructors are OK as-is
-		AsyncData(FILE* &_out) : abort(false), out(_out), buf(NULL) {}
+		AsyncData(FILE* &_out) : abort(false), out(_out), buf(NULL),
+			epipe_occurred(false), async_exception() {}
 
 		void notifyAbort() {
 			{
@@ -914,6 +933,14 @@ private:
 		void waitIdle() {
 			std::unique_lock<std::mutex> lk(m);
 			while(buf!=NULL) cv.wait(lk);
+		}
+
+		/* Rethrow any exception from the async thread in the caller's
+		   context. Call after the async thread has exited. */
+		void checkAsyncError() {
+			if(async_exception) {
+				std::rethrow_exception(async_exception);
+			}
 		}
 
 		void setBuf(const char* _buf, size_t _cur) {
@@ -951,30 +978,38 @@ private:
 	static void writeAsync(AsyncData *asyncDataPtr) {
 		AsyncData &asyncData = *asyncDataPtr;
 		bool abort = false;
-                size_t written = 0;
+		try {
 		while(!abort) {
 			abort = asyncData.waitForBuf();
 			if(abort) break;
-			while (asyncData.cur != 0) {
-                                written += fwrite((const void *)(asyncData.buf + written), 1, asyncData.cur, asyncData.out);
-				if (errno == EPIPE) {
-					exit(EXIT_SUCCESS);
+			/* Write the full buffer, handling partial writes correctly
+			   by advancing the pointer and decrementing remaining. */
+			const char *ptr = asyncData.buf;
+			size_t remaining = asyncData.cur;
+			while(remaining > 0) {
+				size_t n = fwrite((const void *)ptr, 1, remaining, asyncData.out);
+				if(errno == EPIPE) {
+					asyncData.epipe_occurred = true;
+					return; /* graceful exit instead of exit() */
 				}
-                                if (feof(asyncData.out) || written == 0)
-                                        break;
-                                // asyncData.buf += written;
-                                asyncData.cur -= written;
-                                written = 0;
+				if(n == 0 || feof(asyncData.out)) {
+					break;
+				}
+				ptr += n;
+				remaining -= n;
 			}
 
-                        if (written != asyncData.cur) {
-                                // std::cerr << "Error while flushing and closing output" << std::endl;
-                                perror("fwrite");
-				throw 1;
-                        }
+			if(remaining != 0) {
+				perror("fwrite");
+				asyncData.async_exception = std::make_exception_ptr(
+					std::runtime_error("fwrite failed in async output thread"));
+				return;
+			}
 			abort = asyncData.writeComplete();
 		}
-
+		} catch (...) {
+			asyncData.async_exception = std::current_exception();
+		}
 	}
 
 	static constexpr size_t BUF_SZ = 16ul * 1024ul;

@@ -47,6 +47,11 @@ set_target_properties(api_dump_memory PROPERTIES
 # Phase 4 tests — direct driver path (no temp files)
 add_api_test(test_direct_no_tempfile)
 
+# Phase 5 tests — error handling and log callback
+add_api_test(test_error_no_exit)
+add_api_test(test_error_recovery)
+add_api_test(test_log_callback)
+
 # Python correctness comparison tests
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_FOUND)

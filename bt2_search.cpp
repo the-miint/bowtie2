@@ -63,6 +63,10 @@
 #include "simple_func.h"
 #include "presets.h"
 #include "bt2_driver_api.h"
+#ifdef BT2_NO_MAIN
+#include "bt2_api.h"
+#include "bt2_api_exception.h"
+#endif
 #include "opts.h"
 #include "outq.h"
 #include "aligner_seed2.h"
@@ -282,7 +286,12 @@ static void set_format(int &current_format, file_format format) {
 		std::cerr << file_format_names[current_format] << " and "
 			  << file_format_names[format] << " formats are "
 			  << "mutually exclusive." << std::endl;
+#ifdef BT2_NO_MAIN
+		throw Bt2ApiException(BT2_ERR_INVALID_CONFIG,
+			"Mutually exclusive format options");
+#else
 		exit(1);
+#endif
 	}
 }
 
@@ -294,10 +303,18 @@ int set_default_thread_count() {
 			num_threads = std::stoi(omp_num_threads);
 		} catch (std::invalid_argument const &ex) {
 			std::cerr << "Error: " << ex.what() << std::endl;
+#ifdef BT2_NO_MAIN
+			throw Bt2ApiException(BT2_ERR_INVALID_CONFIG, ex.what());
+#else
 			exit(EXIT_FAILURE);
+#endif
 		} catch (std::out_of_range const &ex) {
 			std::cerr << "Error: " << ex.what() << std::endl;
+#ifdef BT2_NO_MAIN
+			throw Bt2ApiException(BT2_ERR_INVALID_CONFIG, ex.what());
+#else
 			exit(EXIT_FAILURE);
+#endif
 		}
 	}
 
@@ -1702,23 +1719,43 @@ static void parseOptions(int argc, const char **argv) {
 
 	if (!localAlign && scUnMapped) {
 		cerr << "ERROR: --soft-clipped-unmapped-tlen can only be set for local alignments." << endl;
+#ifdef BT2_NO_MAIN
+		throw Bt2ApiException(BT2_ERR_INVALID_CONFIG,
+			"--soft-clipped-unmapped-tlen requires --local");
+#else
 		exit(1);
+#endif
 	}
 
 	if ((saw_trim3 || saw_trim5) && saw_trim_to) {
 		cerr << "ERROR: --trim5/--trim3 and --trim-to are mutually exclusive "
 		     << "options." << endl;
+#ifdef BT2_NO_MAIN
+		throw Bt2ApiException(BT2_ERR_INVALID_CONFIG,
+			"--trim5/--trim3 and --trim-to are mutually exclusive");
+#else
 		exit(1);
+#endif
 	}
 
 	if (!saw_bam && saw_preserve_tags) {
 		cerr << "--preserve_tags can only be used when aligning BAM reads." << endl;
+#ifdef BT2_NO_MAIN
+		throw Bt2ApiException(BT2_ERR_INVALID_CONFIG,
+			"--preserve_tags requires BAM input");
+#else
 		exit(1);
+#endif
 	}
 
 	if (!saw_bam && saw_align_paired_reads) {
 		cerr << "--align-paired-reads can only be used when aligning BAM reads." << endl;
+#ifdef BT2_NO_MAIN
+		throw Bt2ApiException(BT2_ERR_INVALID_CONFIG,
+			"--align-paired-reads requires BAM input");
+#else
 		exit(1);
+#endif
 	}
 	// Now parse all the presets.  Might want to pick which presets version to
 	// use according to other parameters.
