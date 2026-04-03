@@ -172,6 +172,31 @@ typedef struct {
 } bt2_align_stats_t;
 
 /* --------------------------------------------------------------------
+ * Input — In-memory reads for bt2_align_run()
+ *
+ * struct_size is set by bt2_input_init(). All string arrays have
+ * length n_reads (or n_reads2 for mate 2). Quality strings use
+ * Phred+33 ASCII encoding. Set quals to NULL for default quality
+ * ('I', Phred 40) on all bases.
+ *
+ * For paired-end: set names2/seqs2/quals2 and n_reads2 (must equal
+ * n_reads). For unpaired: leave mate 2 fields NULL / zero.
+ * -------------------------------------------------------------------- */
+
+typedef struct {
+    size_t        struct_size;   /**< Set by bt2_input_init(). DO NOT set manually. */
+    const char  **names;         /**< Read names, length n_reads. NULL array or
+                                      NULL individual entries default to "read". */
+    const char  **seqs;          /**< DNA sequences, length n_reads. */
+    const char  **quals;         /**< Quality strings, length n_reads. NULL for default qual. */
+    size_t        n_reads;       /**< Number of reads. */
+    const char  **names2;        /**< Mate 2 names. NULL for unpaired. */
+    const char  **seqs2;         /**< Mate 2 sequences. NULL for unpaired. */
+    const char  **quals2;        /**< Mate 2 qualities. NULL for default qual. */
+    size_t        n_reads2;      /**< Number of mate 2 reads. Must equal n_reads if non-zero. */
+} bt2_input_t;
+
+/* --------------------------------------------------------------------
  * Lifecycle functions
  * -------------------------------------------------------------------- */
 
@@ -220,8 +245,31 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
                         bt2_align_stats_t *stats_out);
 
 /**
- * Free an output struct returned by bt2_align_run_files().
+ * Initialize an input struct with default values.
+ * Sets struct_size and zero-fills all fields.
  * Safe to call with NULL (no-op).
+ */
+void bt2_input_init(bt2_input_t *input);
+
+/**
+ * Run alignment on in-memory reads.
+ *
+ * @param ctx         Alignment context.
+ * @param input       In-memory reads (names, sequences, qualities).
+ * @param output_out  On success, receives a pointer to the output.
+ *                    Caller must free with bt2_align_output_free().
+ * @param stats_out   On success, receives alignment statistics.
+ *                    May be NULL if stats are not needed.
+ * @return BT2_OK on success, negative error code on failure.
+ */
+int bt2_align_run(bt2_align_ctx_t *ctx,
+                  const bt2_input_t *input,
+                  bt2_align_output_t **output_out,
+                  bt2_align_stats_t *stats_out);
+
+/**
+ * Free an output struct returned by bt2_align_run_files() or
+ * bt2_align_run(). Safe to call with NULL (no-op).
  */
 void bt2_align_output_free(bt2_align_output_t *output);
 

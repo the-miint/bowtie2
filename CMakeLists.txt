@@ -322,7 +322,7 @@ endif()
 
 add_test(NAME simple-align
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-  COMMAND bowtie2 -x example/index/lambda_virus example/reads/longreads.fq -u 10)
+  COMMAND bowtie2-align-s -x example/index/lambda_virus -U example/reads/longreads.fq -u 10 -S /dev/null)
 # Small index
 add_test(NAME simple-build-small
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}

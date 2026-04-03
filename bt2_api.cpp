@@ -25,6 +25,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <climits>
 #include <unistd.h>
 #include <string>
 #include <vector>
@@ -324,6 +325,141 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
 	}
 
 	return BT2_OK;
+}
+
+/* ---- Input initialization ------------------------------------------ */
+
+void bt2_input_init(bt2_input_t *input) {
+	if (!input) return;
+	memset(input, 0, sizeof(*input));
+	input->struct_size = sizeof(bt2_input_t);
+}
+
+/* ---- In-memory alignment ------------------------------------------- */
+
+/* Write reads to a temporary FASTQ file. Returns 0 on success, -1 on error.
+   Validates that quality string lengths match sequence lengths when provided. */
+static int write_temp_fastq(const char **names, const char **seqs,
+                            const char **quals, size_t n_reads,
+                            char *path_buf, size_t path_buf_size) {
+	const char *tmpdir = getenv("TMPDIR");
+	if (!tmpdir || tmpdir[0] == '\0') tmpdir = "/tmp";
+	snprintf(path_buf, path_buf_size, "%s/bt2_api_XXXXXX", tmpdir);
+	int fd = mkstemp(path_buf);
+	if (fd < 0) return -1;
+
+	FILE *f = fdopen(fd, "w");
+	if (!f) { close(fd); unlink(path_buf); return -1; }
+
+	int err = 0;
+	for (size_t i = 0; i < n_reads; i++) {
+		const char *name = (names && names[i]) ? names[i] : "read";
+		const char *seq  = seqs[i];
+		if (!seq || seq[0] == '\0') { err = -1; break; }
+		size_t seq_len = strlen(seq);
+
+		if (fprintf(f, "@%s\n%s\n+\n", name, seq) < 0) { err = -1; break; }
+		if (quals && quals[i]) {
+			if (strlen(quals[i]) != seq_len) { err = -1; break; }
+			if (fprintf(f, "%s\n", quals[i]) < 0) { err = -1; break; }
+		} else {
+			/* Default quality: 'I' (Phred+33 = 40) for each base */
+			for (size_t j = 0; j < seq_len; j++) {
+				if (fputc('I', f) == EOF) { err = -1; break; }
+			}
+			if (err) break;
+			if (fputc('\n', f) == EOF) { err = -1; break; }
+		}
+	}
+
+	if (fclose(f) != 0) err = -1;
+	if (err) { unlink(path_buf); return -1; }
+	return 0;
+}
+
+int bt2_align_run(bt2_align_ctx_t *ctx,
+                  const bt2_input_t *input,
+                  bt2_align_output_t **output_out,
+                  bt2_align_stats_t *stats_out) {
+	if (!ctx) return BT2_ERR_INVALID_CONFIG;
+	if (!input || input->struct_size != sizeof(bt2_input_t)) {
+		set_last_error(ctx, "Invalid input struct (wrong struct_size or NULL)");
+		return BT2_ERR_INVALID_CONFIG;
+	}
+	if (!output_out) {
+		set_last_error(ctx, "output_out must not be NULL");
+		return BT2_ERR_INVALID_CONFIG;
+	}
+
+	/* Empty input: return empty output */
+	if (input->n_reads == 0) {
+		bt2_align_output_t *empty = (bt2_align_output_t *)calloc(1, sizeof(bt2_align_output_t));
+		if (!empty) {
+			set_last_error(ctx, "Out of memory allocating empty output");
+			return BT2_ERR_NOMEM;
+		}
+		empty->struct_size = sizeof(bt2_align_output_t);
+		empty->n_records = 0;
+		empty->_backing = empty; /* match finalize() pattern: struct is its own backing */
+		*output_out = empty;
+		if (stats_out) memset(stats_out, 0, sizeof(*stats_out));
+		return BT2_OK;
+	}
+
+	if (!input->seqs) {
+		set_last_error(ctx, "input->seqs must not be NULL when n_reads > 0");
+		return BT2_ERR_INPUT;
+	}
+
+	/* Paired-end detection: if either seqs2 or n_reads2 is set, both must be */
+	bool has_seqs2 = (input->seqs2 != NULL);
+	bool has_n2    = (input->n_reads2 > 0);
+	if (has_seqs2 != has_n2) {
+		set_last_error(ctx, "seqs2 and n_reads2 must both be set or both be zero/NULL");
+		return BT2_ERR_INPUT;
+	}
+	bool paired = has_seqs2;
+	if (paired && input->n_reads != input->n_reads2) {
+		set_last_error(ctx, "n_reads and n_reads2 must be equal for paired-end");
+		return BT2_ERR_INPUT;
+	}
+
+	ctx->last_error[0] = '\0';
+
+	/* Write reads to temporary FASTQ file(s) */
+	char mate1_path[PATH_MAX];
+	char mate2_path[PATH_MAX];
+	mate1_path[0] = '\0';
+	mate2_path[0] = '\0';
+
+	if (write_temp_fastq(input->names, input->seqs, input->quals,
+	                     input->n_reads, mate1_path, sizeof(mate1_path)) != 0) {
+		set_last_error(ctx, "Failed to write temporary FASTQ for mate 1");
+		return BT2_ERR_INPUT;
+	}
+
+	if (paired) {
+		if (write_temp_fastq(input->names2, input->seqs2, input->quals2,
+		                     input->n_reads2, mate2_path, sizeof(mate2_path)) != 0) {
+			unlink(mate1_path);
+			set_last_error(ctx, "Failed to write temporary FASTQ for mate 2");
+			return BT2_ERR_INPUT;
+		}
+	}
+
+	/* Delegate to file-based alignment */
+	const char *m1[] = { mate1_path };
+	const char *m2[] = { mate2_path };
+	int rc = bt2_align_run_files(ctx, m1, 1,
+	                             paired ? m2 : NULL,
+	                             paired ? 1 : 0,
+	                             output_out, stats_out);
+
+	/* Clean up temp files */
+	unlink(mate1_path);
+	if (paired) unlink(mate2_path);
+
+	return rc;
 }
 
 void bt2_align_output_free(bt2_align_output_t *output) {

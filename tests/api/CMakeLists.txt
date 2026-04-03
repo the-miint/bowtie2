@@ -31,13 +31,31 @@ set_target_properties(api_dump PROPERTIES
   C_STANDARD 11
   C_STANDARD_REQUIRED ON)
 
-# Python correctness comparison test
+# Phase 3 tests — in-memory input
+add_api_test(test_input_memory)
+add_api_test(test_input_paired_memory)
+add_api_test(test_input_empty)
+add_api_test(test_input_no_qual)
+
+# api_dump_memory helper (used by Python memory-vs-file comparison tests)
+add_executable(api_dump_memory api_dump_memory.c)
+target_link_libraries(api_dump_memory bowtie2-align-s-lib)
+set_target_properties(api_dump_memory PROPERTIES
+  C_STANDARD 11
+  C_STANDARD_REQUIRED ON)
+
+# Python correctness comparison tests
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_FOUND)
   add_test(NAME api-test-align-vs-native
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_align_vs_native.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-  # Ensure native aligner and api_dump are built before the test runs
   set_tests_properties(api-test-align-vs-native PROPERTIES
     DEPENDS "api-test_align_basic")
+
+  add_test(NAME api-test-input-memory-vs-file
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_input_memory_vs_file.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(api-test-input-memory-vs-file PROPERTIES
+    DEPENDS "api-test_input_memory")
 endif()
