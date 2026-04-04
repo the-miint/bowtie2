@@ -19,22 +19,103 @@
 
 /**
  * @file bt2_api.h
- * @brief Public C API for bowtie2 alignment library.
+ * @brief Public C API for bowtie2 alignment and index building.
  *
- * This header provides a C API for bowtie2 following the GPL-boundary
- * integration pattern: config_init/create/run/destroy lifecycle with
- * structured error reporting.
+ * This header provides a reentrant C API for bowtie2, designed for
+ * embedding in long-running processes (e.g. GPL-boundary integration
+ * with DuckDB/miint). Both the aligner and index builder follow the
+ * same lifecycle: config_init -> create -> run -> destroy.
  *
- * Thread safety:
- *   The current implementation serializes all alignment calls behind
- *   a global mutex. Concurrent calls on different bt2_align_ctx_t
- *   instances are safe but will execute sequentially. Do NOT assume
- *   independent parallel execution — this limitation will be removed
- *   in a future version once global state has been encapsulated into
- *   per-context structures (see Phase 4 of the API roadmap).
+ * == OVERVIEW ==
+ *
+ * Two independent APIs share this header:
+ *   - Aligner: bt2_align_config_init/create/run/run_files/destroy
+ *   - Builder: bt2_build_config_init/create/run/destroy
+ *
+ * Both return structured error codes (BT2_ERR_*) and never call
+ * exit() or abort() from library code.
+ *
+ * == THREAD SAFETY ==
+ *
+ * All API calls are serialized behind internal mutexes. Concurrent
+ * calls from multiple threads are safe but execute sequentially.
+ * The aligner and builder use separate internal mutexes, but stream
+ * redirection for the log callback adds an additional serialization
+ * point — in practice, all API calls execute one at a time.
+ *
+ * DO NOT assume parallel execution — this is a sequential API.
+ *
+ * == SAFE USAGE PATTERNS ==
+ *
+ *   // Pattern 1: Build then align (same process)
+ *   bt2_build_ctx_t *bctx = bt2_build_create(&bconfig, &err);
+ *   bt2_build_run(bctx, &bstats);
+ *   bt2_build_destroy(bctx);
+ *
+ *   bt2_align_ctx_t *actx = bt2_align_create(&aconfig, &err);
+ *   bt2_align_run(actx, &input, &output, &astats);
+ *   bt2_align_output_free(output);
+ *   bt2_align_destroy(actx);
+ *
+ *   // Pattern 2: Multiple alignments, same context
+ *   bt2_align_ctx_t *ctx = bt2_align_create(&config, &err);
+ *   for (int i = 0; i < n_batches; i++) {
+ *       bt2_align_run(ctx, &inputs[i], &outputs[i], NULL);
+ *       process(outputs[i]);
+ *       bt2_align_output_free(outputs[i]);
+ *   }
+ *   bt2_align_destroy(ctx);
+ *
+ *   // Pattern 3: Error recovery
+ *   int rc = bt2_align_run(ctx, &bad_input, &output, NULL);
+ *   if (rc != BT2_OK) {
+ *       // Context remains valid — retry with different input
+ *       rc = bt2_align_run(ctx, &good_input, &output, NULL);
+ *   }
+ *
+ * == MEMORY MANAGEMENT ==
+ *
+ * - Contexts: caller creates with _create(), frees with _destroy().
+ * - Align output: caller frees with bt2_align_output_free().
+ * - Build output: index files written to disk, no output struct.
+ * - Config structs: caller-owned, not copied (strings are deep-copied
+ *   internally by _create). Safe to free/modify after _create returns.
+ * - Input structs (bt2_input_t): caller-owned, read during _run only.
+ *   Safe to free/modify after _run returns.
+ *
+ * == ERROR HANDLING ==
+ *
+ * All _run functions return BT2_OK (0) on success, negative BT2_ERR_*
+ * on failure. Use bt2_strerror() for category name, _last_error() for
+ * detailed message. Contexts remain valid after errors — callers may
+ * retry or destroy.
+ *
+ * == LOG CALLBACK ==
+ *
+ * Set config.log_fn to receive diagnostic messages (errors, warnings,
+ * alignment/build progress). The callback receives all output that
+ * would otherwise go to stderr/stdout. When log_fn is set, quiet is
+ * overridden internally so the callback receives the full output.
+ * When log_fn is NULL and quiet is set, std::cout and std::cerr
+ * output is suppressed via streambuf redirection.
+ *
+ * Log levels: BT2_LOG_ERROR, BT2_LOG_WARN, BT2_LOG_INFO, BT2_LOG_DEBUG.
+ * Level detection is best-effort based on message prefix ("Error:",
+ * "Warning:", etc.). Unrecognized prefixes default to BT2_LOG_INFO.
+ *
+ * == LIMITATIONS ==
+ *
+ * - Sequential execution only (mutex-serialized, not parallel).
+ * - Seed parameter is clamped to int range (0 to 2147483647).
+ * - struct_size field in config/output structs must not be set
+ *   manually — always use the _init() functions.
+ *
+ * == ABI COMPATIBILITY ==
  *
  * All types use C-compatible representations (int for booleans,
  * explicit-width integers, void* callbacks) for FFI safety.
+ * struct_size fields enable forward-compatible struct evolution:
+ * new fields are appended; never reorder or remove existing fields.
  */
 
 #ifndef BT2_API_H
@@ -318,9 +399,7 @@ typedef struct {
     int          offrate;        /**< SA sampling: 1 in 2^N. Default: 4. */
     int          packed;         /**< Nonzero for packed strings (less RAM). Default: 0. */
     int          quiet;          /**< Nonzero to suppress verbose output. Default: 1. */
-    bt2_log_fn   log_fn;         /**< Log callback. NULL to discard.
-                                      Captures stderr output only; some build
-                                      progress messages go to stdout. */
+    bt2_log_fn   log_fn;         /**< Log callback. NULL to discard. */
     void        *log_user_data;  /**< Passed to log_fn. */
 } bt2_build_config_t;
 

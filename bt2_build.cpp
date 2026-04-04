@@ -381,12 +381,14 @@ static void driver(
 	int reverse)
 {
 	EList<FileBuf*> is(MISC_CAT);
+	EList<stringstream*> ss_holder(MISC_CAT); // track for cleanup
 	bool bisulfite = false;
 	RefReadInParams refparams(false, reverse, nsToAs, bisulfite);
 	assert_gt(infiles.size(), 0);
 	if(format == CMDLINE) {
 		// Adapt sequence strings to stringstreams open for input
 		stringstream *ss = new stringstream();
+		ss_holder.push_back(ss);
 		for(size_t i = 0; i < infiles.size(); i++) {
 			(*ss) << ">" << i << endl << infiles[i].c_str() << endl;
 		}
@@ -549,6 +551,10 @@ static void driver(
 			// FileBuf object closes file when deconstructed
 			delete is[i];
         }
+	// Clean up stringstreams allocated for CMDLINE mode
+	for (size_t i = 0; i < ss_holder.size(); ++i) {
+		delete ss_holder[i];
+	}
 }
 
 static const char *argv0 = NULL;

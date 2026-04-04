@@ -210,7 +210,8 @@ int bt2_build_run(bt2_build_ctx_t *ctx,
 		std::lock_guard<std::mutex> lock(g_build_mutex);
 		CerrRedirectGuard cerr_guard(ctx->config.log_fn,
 		                             ctx->config.log_user_data,
-		                             ctx->config.quiet);
+		                             ctx->config.quiet,
+		                             true /* redirect_cout: builder writes progress to cout */);
 
 		rc = bowtie_build((int)argv.size(), argv.data());
 	}

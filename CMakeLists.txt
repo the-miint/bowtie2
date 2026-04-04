@@ -32,6 +32,21 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -Wall")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -funroll-loops")
+
+# Sanitizer builds (use with -DCMAKE_BUILD_TYPE=RelWithDebInfo or Debug)
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+if(ENABLE_ASAN AND ENABLE_TSAN)
+  message(FATAL_ERROR "ENABLE_ASAN and ENABLE_TSAN are mutually exclusive")
+endif()
+if(ENABLE_ASAN)
+  add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address)
+endif()
+if(ENABLE_TSAN)
+  add_compile_options(-fsanitize=thread)
+  add_link_options(-fsanitize=thread)
+endif()
 set(INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/bin" CACHE PATH "Installation directory for executables")
 
 
@@ -317,6 +332,14 @@ target_compile_definitions(bowtie2-build-s-lib PRIVATE BT2_BUILD_NO_MAIN BT2_NO_
 target_compile_definitions(bowtie2-build-l-lib PRIVATE BT2_BUILD_NO_MAIN BT2_NO_MAIN BOWTIE_64BIT_INDEX)
 target_include_directories(bowtie2-build-s-lib PUBLIC ${PROJECT_SOURCE_DIR})
 target_include_directories(bowtie2-build-l-lib PUBLIC ${PROJECT_SOURCE_DIR})
+
+# --- Combined library (aligner + builder for integration tests) ---
+set(COMBINED_LIB_CPPS
+  ${SEARCH_CPPS} bt2_api.cpp bt2_api_common.cpp bt2_sam_parse.cpp aln_sink_columnar.cpp
+  bt2_build.cpp diff_sample.cpp bowtie_build_main.cpp bt2_build_api.cpp)
+add_library(bowtie2-combined-s-lib STATIC ${COMBINED_LIB_CPPS} ${SHARED_CPPS})
+target_compile_definitions(bowtie2-combined-s-lib PRIVATE BT2_NO_MAIN BT2_BUILD_NO_MAIN)
+target_include_directories(bowtie2-combined-s-lib PUBLIC ${PROJECT_SOURCE_DIR})
 
 install(TARGETS ${BOWTIE2_BIN_LIST} DESTINATION bin)
 install(FILES ${BOWTIE2_WRAPPER_SCRIPTS}

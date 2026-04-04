@@ -70,6 +70,17 @@ add_build_api_test(test_build_basic)
 add_build_api_test(test_build_error)
 add_build_api_test(test_build_context_reuse)
 add_build_api_test(test_build_log_callback)
+add_build_api_test(test_build_no_stdout)
+
+# Phase 7 integration test — links combined lib (aligner + builder)
+add_executable(test_build_then_align test_build_then_align.c)
+target_link_libraries(test_build_then_align bowtie2-combined-s-lib)
+set_target_properties(test_build_then_align PROPERTIES
+  C_STANDARD 11
+  C_STANDARD_REQUIRED ON)
+add_test(NAME api-test_build_then_align
+  COMMAND test_build_then_align
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 # api_build helper (used by Python build comparison test)
 add_executable(api_build api_build.c)
