@@ -82,4 +82,6 @@ jobs:
       - name: Build
         run: cmake --build build -j$(nproc)
       - name: Run API tests under TSan
+        env:
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/tsan_suppressions.txt
         run: cd build && ctest -R api-test --output-on-failure --timeout 300

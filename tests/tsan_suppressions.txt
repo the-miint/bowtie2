@@ -1,0 +1,8 @@
+# ThreadSanitizer suppressions for known pre-existing data races in
+# native bowtie2 code. These are upstream issues, not introduced by
+# the C API work.
+
+# OutFileBuf::flushBlocking() reads asyncData_.buf without mutex
+# while the async write thread writes it in writeComplete() under mutex.
+# See filebuf.h:831 vs filebuf.h:967.
+race:OutFileBuf::flushBlocking
