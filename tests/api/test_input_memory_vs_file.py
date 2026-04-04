@@ -14,8 +14,20 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 
-API_DUMP = os.path.join(BUILD_DIR, "tests", "api", "api_dump")
-API_DUMP_MEMORY = os.path.join(BUILD_DIR, "tests", "api", "api_dump_memory")
+
+def find_binary(path):
+    """Find a binary, trying the exact path first, then with -debug suffix."""
+    if os.path.exists(path):
+        return path
+    debug_path = path + "-debug"
+    if os.path.exists(debug_path):
+        return debug_path
+    print(f"Binary not found: {path} (also tried {debug_path})", file=sys.stderr)
+    sys.exit(1)
+
+
+API_DUMP = find_binary(os.path.join(BUILD_DIR, "tests", "api", "api_dump"))
+API_DUMP_MEMORY = find_binary(os.path.join(BUILD_DIR, "tests", "api", "api_dump_memory"))
 INDEX = os.path.join(PROJECT_ROOT, "example", "index", "lambda_virus")
 
 

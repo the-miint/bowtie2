@@ -14,8 +14,21 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 
-NATIVE_BT2 = os.path.join(BUILD_DIR, "bowtie2-align-s")
-API_DUMP = os.path.join(BUILD_DIR, "tests", "api", "api_dump")
+
+def find_binary(path):
+    """Find a binary, trying the exact path first, then with -debug suffix."""
+    if os.path.exists(path):
+        return path
+    # Debug/sanitizer builds append -debug to binary names
+    debug_path = path + "-debug"
+    if os.path.exists(debug_path):
+        return debug_path
+    print(f"Binary not found: {path} (also tried {debug_path})", file=sys.stderr)
+    sys.exit(1)
+
+
+NATIVE_BT2 = find_binary(os.path.join(BUILD_DIR, "bowtie2-align-s"))
+API_DUMP = find_binary(os.path.join(BUILD_DIR, "tests", "api", "api_dump"))
 INDEX = os.path.join(PROJECT_ROOT, "example", "index", "lambda_virus")
 
 

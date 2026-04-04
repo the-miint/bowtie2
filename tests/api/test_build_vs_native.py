@@ -18,10 +18,22 @@ import shutil
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 
-API_BUILD = os.path.join(BUILD_DIR, "tests", "api", "api_build")
-NATIVE_BUILD = os.path.join(BUILD_DIR, "bowtie2-build-s")
-API_DUMP = os.path.join(BUILD_DIR, "tests", "api", "api_dump")
-NATIVE_ALIGN = os.path.join(BUILD_DIR, "bowtie2-align-s")
+
+def find_binary(path):
+    """Find a binary, trying the exact path first, then with -debug suffix."""
+    if os.path.exists(path):
+        return path
+    debug_path = path + "-debug"
+    if os.path.exists(debug_path):
+        return debug_path
+    print(f"Binary not found: {path} (also tried {debug_path})", file=sys.stderr)
+    sys.exit(1)
+
+
+API_BUILD = find_binary(os.path.join(BUILD_DIR, "tests", "api", "api_build"))
+NATIVE_BUILD = find_binary(os.path.join(BUILD_DIR, "bowtie2-build-s"))
+API_DUMP = find_binary(os.path.join(BUILD_DIR, "tests", "api", "api_dump"))
+NATIVE_ALIGN = find_binary(os.path.join(BUILD_DIR, "bowtie2-align-s"))
 
 REFERENCE = os.path.join(PROJECT_ROOT, "example", "reference", "lambda_virus.fa")
 READS = os.path.join(PROJECT_ROOT, "example", "reads", "longreads.fq")
