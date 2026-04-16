@@ -47,6 +47,7 @@
 #ifdef BT2_NO_MAIN
 #include "aln_sink_columnar.h"
 #endif
+#include "bt2_config_argv.h"
 #include "pat.h"
 #include "threading.h"
 #include "ds.h"
@@ -5182,7 +5183,8 @@ static void driver(
 			if(g_api_columnar_nthreads > 0) {
 				mssink = new AlnSinkColumnar(
 					oq, refnames, gQuiet,
-					(size_t)g_api_columnar_nthreads);
+					(size_t)g_api_columnar_nthreads,
+					samNoUnal);
 				g_api_sink = mssink;
 				mssink_owned = false;
 			}
@@ -5309,8 +5311,8 @@ static void driver(
  * The -x placeholder is required by parseOptions but ignored — driver()
  * receives the real index path as a parameter.
  */
-void apply_config_to_statics(int api_nthreads, int64_t api_seed, int api_quiet,
-                             int api_preset, int api_local_align) {
+void apply_config_to_statics(const bt2_align_config_t *config,
+                             int effective_quiet) {
 	// Reset getopt state and all statics
 	opterr = optind = 1;
 	resetOptions();
@@ -5320,7 +5322,7 @@ void apply_config_to_statics(int api_nthreads, int64_t api_seed, int api_quiet,
 		argv0 = "bowtie2";
 	}
 
-	// Build a minimal argv and call parseOptions() to correctly set
+	// Build argv from config and call parseOptions() to correctly set
 	// all statics including preset scoring/seed policies.
 	// No -c or input args — the injected PatternComposer provides reads.
 	std::vector<const char *> argv;
@@ -5329,35 +5331,36 @@ void apply_config_to_statics(int api_nthreads, int64_t api_seed, int api_quiet,
 	argv.push_back("dummy"); // placeholder — driver() gets the real index
 
 	// Preset
-	const char *preset_flag = NULL;
-	switch(api_preset) {
-		case 0: preset_flag = api_local_align ? "--very-fast-local" : "--very-fast"; break;
-		case 1: preset_flag = api_local_align ? "--fast-local" : "--fast"; break;
-		case 2: preset_flag = api_local_align ? "--sensitive-local" : "--sensitive"; break;
-		case 3: preset_flag = api_local_align ? "--very-sensitive-local" : "--very-sensitive"; break;
-		default: preset_flag = api_local_align ? "--sensitive-local" : "--sensitive"; break;
+	const char *pf = NULL;
+	switch(config->preset) {
+		case 0: pf = config->local_align ? "--very-fast-local" : "--very-fast"; break;
+		case 1: pf = config->local_align ? "--fast-local" : "--fast"; break;
+		case 2: pf = config->local_align ? "--sensitive-local" : "--sensitive"; break;
+		case 3: pf = config->local_align ? "--very-sensitive-local" : "--very-sensitive"; break;
+		default: pf = config->local_align ? "--sensitive-local" : "--sensitive"; break;
 	}
-	argv.push_back(preset_flag);
+	argv.push_back(pf);
 
 	// Threads
 	char threads_buf[32];
-	snprintf(threads_buf, sizeof(threads_buf), "%d", api_nthreads > 0 ? api_nthreads : 1);
+	snprintf(threads_buf, sizeof(threads_buf), "%d", config->nthreads > 0 ? config->nthreads : 1);
 	argv.push_back("-p");
 	argv.push_back(threads_buf);
 
 	// Seed
 	char seed_buf[32];
-	snprintf(seed_buf, sizeof(seed_buf), "%lld", (long long)api_seed);
+	snprintf(seed_buf, sizeof(seed_buf), "%" PRId64, (int64_t)config->seed);
 	argv.push_back("--seed");
 	argv.push_back(seed_buf);
 
 	// Quiet
-	if(api_quiet) {
+	if(effective_quiet) {
 		argv.push_back("--quiet");
 	}
 
-	// Reorder for reproducible output
-	argv.push_back("--reorder");
+	// Alignment options (shared with file-based path)
+	ConfigArgvBufs option_bufs;
+	append_config_argv(config, argv, &option_bufs);
 
 	// Parse all options — this correctly applies presets, scoring policies, etc.
 	parseOptions((int)argv.size(), argv.data());

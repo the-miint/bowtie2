@@ -105,7 +105,7 @@ static int read_fastq(const char *path,
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <index> <reads.fq> [reads2.fq]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <index> <reads.fq> [reads2.fq] [options...]\n", argv[0]);
         return 1;
     }
 
@@ -113,6 +113,93 @@ int main(int argc, char **argv) {
     bt2_align_config_init(&config);
     config.index_path = argv[1];
     config.quiet = 1;
+
+    /* Determine reads files and where options start */
+    const char *reads1_path = argv[2];
+    const char *reads2_path = NULL;
+    int opt_start = 3;
+    if (argc > 3 && strncmp(argv[3], "--", 2) != 0) {
+        reads2_path = argv[3];
+        opt_start = 4;
+    }
+
+    /* Parse option flags (same as api_dump.c) */
+    for (int i = opt_start; i < argc; i++) {
+        if (strcmp(argv[i], "--k") == 0 && i + 1 < argc)
+            config.k = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--report-all") == 0)
+            config.report_all = 1;
+        else if (strcmp(argv[i], "--trim5") == 0 && i + 1 < argc)
+            config.trim5 = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--trim3") == 0 && i + 1 < argc)
+            config.trim3 = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--ma") == 0 && i + 1 < argc)
+            config.match_bonus = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--mp") == 0 && i + 1 < argc)
+            config.mismatch_penalty = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--np") == 0 && i + 1 < argc)
+            config.n_penalty = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--rdg-open") == 0 && i + 1 < argc)
+            config.read_gap_open = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--rdg-extend") == 0 && i + 1 < argc)
+            config.read_gap_extend = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--rfg-open") == 0 && i + 1 < argc)
+            config.ref_gap_open = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--rfg-extend") == 0 && i + 1 < argc)
+            config.ref_gap_extend = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--score-min") == 0 && i + 1 < argc)
+            config.score_min = argv[++i];
+        else if (strcmp(argv[i], "--min-insert") == 0 && i + 1 < argc)
+            config.min_insert = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--max-insert") == 0 && i + 1 < argc)
+            config.max_insert = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--mate-orient") == 0 && i + 1 < argc) {
+            i++;
+            if (strcmp(argv[i], "RF") == 0) config.mate_orientation = BT2_MATE_RF;
+            else if (strcmp(argv[i], "FF") == 0) config.mate_orientation = BT2_MATE_FF;
+            else config.mate_orientation = BT2_MATE_FR;
+        }
+        else if (strcmp(argv[i], "--no-mixed") == 0)
+            config.no_mixed = 1;
+        else if (strcmp(argv[i], "--no-discordant") == 0)
+            config.no_discordant = 1;
+        else if (strcmp(argv[i], "--dovetail") == 0)
+            config.dovetail = 1;
+        else if (strcmp(argv[i], "--no-contain") == 0)
+            config.no_contain = 1;
+        else if (strcmp(argv[i], "--no-overlap") == 0)
+            config.no_overlap = 1;
+        else if (strcmp(argv[i], "--nofw") == 0)
+            config.nofw = 1;
+        else if (strcmp(argv[i], "--norc") == 0)
+            config.norc = 1;
+        else if (strcmp(argv[i], "--seed-mm") == 0 && i + 1 < argc)
+            config.seed_mismatches = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--seed-len") == 0 && i + 1 < argc)
+            config.seed_length = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--max-dp-fail") == 0 && i + 1 < argc)
+            config.max_dp_failures = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--max-seed-rounds") == 0 && i + 1 < argc)
+            config.max_seed_rounds = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--no-unal") == 0)
+            config.no_unal = 1;
+        else if (strcmp(argv[i], "--xeq") == 0)
+            config.xeq = 1;
+        else if (strcmp(argv[i], "--rg-id") == 0 && i + 1 < argc)
+            config.rg_id = argv[++i];
+        else if (strcmp(argv[i], "--ignore-quals") == 0)
+            config.ignore_quals = 1;
+        else if (strcmp(argv[i], "--reorder") == 0)
+            config.reorder = 1;
+        else if (strcmp(argv[i], "--local") == 0)
+            config.local_align = 1;
+        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc)
+            config.seed = atoll(argv[++i]);
+        else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            return 1;
+        }
+    }
 
     int err;
     bt2_align_ctx_t *ctx = bt2_align_create(&config, &err);
@@ -125,8 +212,8 @@ int main(int argc, char **argv) {
     char **names1 = NULL, **seqs1 = NULL, **quals1 = NULL;
     size_t n1 = 0;
     char *backing1 = NULL;
-    if (read_fastq(argv[2], &names1, &seqs1, &quals1, &n1, &backing1) != 0) {
-        fprintf(stderr, "Failed to read %s\n", argv[2]);
+    if (read_fastq(reads1_path, &names1, &seqs1, &quals1, &n1, &backing1) != 0) {
+        fprintf(stderr, "Failed to read %s\n", reads1_path);
         bt2_align_destroy(ctx);
         return 1;
     }
@@ -135,9 +222,9 @@ int main(int argc, char **argv) {
     char **names2 = NULL, **seqs2 = NULL, **quals2 = NULL;
     size_t n2 = 0;
     char *backing2 = NULL;
-    int paired = (argc > 3);
+    int paired = (reads2_path != NULL);
     if (paired) {
-        if (read_fastq(argv[3], &names2, &seqs2, &quals2, &n2, &backing2) != 0) {
+        if (read_fastq(reads2_path, &names2, &seqs2, &quals2, &n2, &backing2) != 0) {
             fprintf(stderr, "Failed to read %s\n", argv[3]);
             free(names1); free(seqs1); free(quals1); free(backing1);
             bt2_align_destroy(ctx);

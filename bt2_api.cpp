@@ -22,6 +22,7 @@
 #include "bt2_api_exception.h"
 #include "bt2_driver_api.h"
 #include "bt2_log_streambuf.h"
+#include "bt2_config_argv.h"
 #include "aln_sink_columnar.h"
 #include "pat.h"
 #include "formats.h"
@@ -118,6 +119,21 @@ void bt2_align_config_init(bt2_align_config_t *config) {
 	config->quiet          = 1;
 	config->log_fn         = NULL;
 	config->log_user_data  = NULL;
+
+	/* v0.2 fields — booleans/trim/k/strings already 0/NULL from memset */
+	config->match_bonus       = -1;
+	config->mismatch_penalty  = -1;
+	config->n_penalty         = -1;
+	config->read_gap_open     = -1;
+	config->read_gap_extend   = -1;
+	config->ref_gap_open      = -1;
+	config->ref_gap_extend    = -1;
+	config->min_insert        = -1;
+	config->max_insert        = -1;
+	config->seed_mismatches   = -1;
+	config->seed_length       = -1;
+	config->max_dp_failures   = -1;
+	config->max_seed_rounds   = -1;
 }
 
 /* ---- Error reporting ----------------------------------------------- */
@@ -144,6 +160,10 @@ bt2_align_ctx_t *bt2_align_create(const bt2_align_config_t *config,
 		if (error_out) *error_out = BT2_ERR_INDEX;
 		return NULL;
 	}
+	if (config->k > 0 && config->report_all) {
+		if (error_out) *error_out = BT2_ERR_INVALID_CONFIG;
+		return NULL;
+	}
 
 	bt2_align_ctx_t *ctx = (bt2_align_ctx_t *)calloc(1, sizeof(bt2_align_ctx_t));
 	if (!ctx) {
@@ -160,6 +180,30 @@ bt2_align_ctx_t *bt2_align_create(const bt2_align_config_t *config,
 
 	ctx->config = *config;
 	ctx->config.index_path = ctx->index_path_owned;
+
+	/* Deep-copy optional strings */
+	if (config->score_min) {
+		ctx->score_min_owned = strdup(config->score_min);
+		if (!ctx->score_min_owned) {
+			free(ctx->index_path_owned);
+			free(ctx);
+			if (error_out) *error_out = BT2_ERR_NOMEM;
+			return NULL;
+		}
+		ctx->config.score_min = ctx->score_min_owned;
+	}
+	if (config->rg_id) {
+		ctx->rg_id_owned = strdup(config->rg_id);
+		if (!ctx->rg_id_owned) {
+			free(ctx->score_min_owned);
+			free(ctx->index_path_owned);
+			free(ctx);
+			if (error_out) *error_out = BT2_ERR_NOMEM;
+			return NULL;
+		}
+		ctx->config.rg_id = ctx->rg_id_owned;
+	}
+
 	ctx->last_error[0] = '\0';
 
 	if (error_out) *error_out = BT2_OK;
@@ -169,6 +213,8 @@ bt2_align_ctx_t *bt2_align_create(const bt2_align_config_t *config,
 void bt2_align_destroy(bt2_align_ctx_t *ctx) {
 	if (!ctx) return;
 	free(ctx->index_path_owned);
+	free(ctx->score_min_owned);
+	free(ctx->rg_id_owned);
 	free(ctx);
 }
 
@@ -225,6 +271,10 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
 	if (effective_quiet) {
 		argv.push_back("--quiet");
 	}
+
+	/* Alignment options from config (shared with memory path) */
+	ConfigArgvBufs option_bufs;
+	append_config_argv(&ctx->config, argv, &option_bufs);
 
 	/* Input files */
 	/* Build comma-separated file lists for bowtie2 */
@@ -405,9 +455,7 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 		int effective_quiet = (ctx->config.log_fn != NULL) ? 0 : ctx->config.quiet;
 
 		/* Set statics from API config */
-		apply_config_to_statics(ctx->config.nthreads, ctx->config.seed,
-		                        effective_quiet, ctx->config.preset,
-		                        ctx->config.local_align);
+		apply_config_to_statics(&ctx->config, effective_quiet);
 
 		/* Build PatternParams for MemoryPatternSource */
 		PatternParams pp(
@@ -419,8 +467,8 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 			false,         /* solexa64 */
 			false,         /* phred64 */
 			false,         /* intQuals */
-			0,             /* trim5 */
-			0,             /* trim3 */
+			ctx->config.trim5,  /* trim5 */
+			ctx->config.trim3,  /* trim3 */
 			make_pair((short)0, (size_t)0), /* trimTo */
 			0,             /* sampleLen */
 			0,             /* sampleFreq */

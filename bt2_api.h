@@ -133,7 +133,7 @@ extern "C" {
  * -------------------------------------------------------------------- */
 
 #define BT2_API_VERSION_MAJOR 0
-#define BT2_API_VERSION_MINOR 1
+#define BT2_API_VERSION_MINOR 2
 #define BT2_API_VERSION_PATCH 0
 
 /* --------------------------------------------------------------------
@@ -164,6 +164,14 @@ extern "C" {
 #define BT2_PRESET_FAST            1
 #define BT2_PRESET_SENSITIVE       2
 #define BT2_PRESET_VERY_SENSITIVE  3
+
+/* --------------------------------------------------------------------
+ * Mate orientation (for mate_orientation field)
+ * -------------------------------------------------------------------- */
+
+#define BT2_MATE_FR  0
+#define BT2_MATE_RF  1
+#define BT2_MATE_FF  2
 
 /* --------------------------------------------------------------------
  * Opaque context type
@@ -199,6 +207,61 @@ typedef struct {
     bt2_log_fn   log_fn;        /**< Log callback. NULL to discard log output. When non-NULL,
                                      receives all log messages regardless of quiet setting. */
     void        *log_user_data; /**< Passed to log_fn as user_data. */
+
+    /* ---- v0.2 fields (appended for ABI compatibility) ---- */
+
+    /* Reporting */
+    int          k;              /**< Report up to k alignments per read (-k). 0 = not set (default 1). */
+    int          report_all;     /**< Report all alignments (-a). Default: 0. */
+
+    /* Trimming */
+    int          trim5;          /**< Trim N bases from 5' end (--trim5). Default: 0. */
+    int          trim3;          /**< Trim N bases from 3' end (--trim3). Default: 0. */
+
+    /* Scoring — sentinel -1 means "use bowtie2 mode-dependent default" */
+    int          match_bonus;       /**< Match bonus (--ma). Default: -1. */
+    int          mismatch_penalty;  /**< Max mismatch penalty (--mp). Default: -1. */
+    int          n_penalty;         /**< N penalty (--np). Default: -1. */
+    int          read_gap_open;     /**< Read gap open penalty (--rdg arg1). Default: -1. */
+    int          read_gap_extend;   /**< Read gap extend penalty (--rdg arg2). Default: -1. */
+    int          ref_gap_open;      /**< Ref gap open penalty (--rfg arg1). Default: -1. */
+    int          ref_gap_extend;    /**< Ref gap extend penalty (--rfg arg2). Default: -1. */
+    const char  *score_min;         /**< Min score function string (--score-min). Default: NULL. */
+
+    /* Paired-end */
+    int          min_insert;        /**< Min fragment length (--minins/-I). Default: -1. */
+    int          max_insert;        /**< Max fragment length (--maxins/-X). Default: -1. */
+    int          mate_orientation;  /**< BT2_MATE_FR/RF/FF. Default: BT2_MATE_FR (0).
+                                     Note: 0 means FR (active value), not "unset".
+                                     Unlike -1 sentinel fields, there is no "unset"
+                                     state — FR is always the default orientation. */
+    int          no_mixed;          /**< Suppress unpaired for paired reads (--no-mixed). Default: 0. */
+    int          no_discordant;     /**< Suppress discordant pairs (--no-discordant). Default: 0. */
+    int          dovetail;          /**< Allow dovetail overlap (--dovetail). Default: 0. */
+    int          no_contain;        /**< Disallow containment (--no-contain). Default: 0. */
+    int          no_overlap;        /**< Disallow mate overlap (--no-overlap). Default: 0. */
+
+    /* Strand */
+    int          nofw;              /**< Don't align forward strand (--nofw). Default: 0. */
+    int          norc;              /**< Don't align reverse complement (--norc). Default: 0. */
+
+    /* Effort — sentinel -1 means "preset-dependent" */
+    int          seed_mismatches;   /**< Max seed mismatches 0 or 1 (-N). Default: -1. */
+    int          seed_length;       /**< Seed substring length 1-32 (-L). Default: -1. */
+    int          max_dp_failures;   /**< Max consecutive extend failures (-D). Default: -1. */
+    int          max_seed_rounds;   /**< Max seed rounds (-R). Default: -1. */
+
+    /* SAM output */
+    int          no_unal;           /**< Suppress unaligned reads (--no-unal). Default: 0. */
+    int          xeq;               /**< Use =/X in CIGAR instead of M (--xeq). Default: 0. */
+    const char  *rg_id;             /**< Read group ID (--rg-id). Default: NULL.
+                                     Note: affects the aligner's internal RG handling
+                                     but RG:Z tags are not yet included in
+                                     bt2_align_output_t. */
+
+    /* Other */
+    int          ignore_quals;      /**< Treat all quals as 30 (--ignore-quals). Default: 0. */
+    int          reorder;           /**< Preserve input order in output (--reorder). Default: 0. */
 } bt2_align_config_t;
 
 /* --------------------------------------------------------------------

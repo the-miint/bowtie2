@@ -33,9 +33,11 @@ AlnSinkColumnar::AlnSinkColumnar(
 	OutputQueue& oq,
 	const StrList& refnames,
 	bool quiet,
-	size_t nthreads)
+	size_t nthreads,
+	bool no_unal)
 	: AlnSink(oq, refnames, quiet),
-	  thread_bufs_(nthreads)
+	  thread_bufs_(nthreads),
+	  no_unal_(no_unal)
 { }
 
 void AlnSinkColumnar::append(
@@ -92,6 +94,13 @@ void AlnSinkColumnar::appendMate(
 	const Mapq&       mapqCalc,
 	const Scoring&    sc)
 {
+	/* Skip unaligned records when --no-unal is set.
+	   Intentionally before the threadId bounds check: we don't need a
+	   thread buffer slot for a record we're not storing. */
+	if(no_unal_ && rs == NULL) {
+		return;
+	}
+
 	/* Hard bounds check — assert is compiled out in Release builds (#6) */
 	if(threadId >= thread_bufs_.size()) {
 		/* Thread count exceeded expected nthreads. Resize under lock.

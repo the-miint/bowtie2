@@ -7,7 +7,7 @@ pattern.
 
 **Header:** `bt2_api.h`
 **License:** GPL-3.0-or-later (same as bowtie2)
-**Version:** 0.1.0
+**Version:** 0.2.0
 
 ## Table of Contents
 
@@ -134,19 +134,7 @@ cd build && ctest --output-on-failure
 
 ### Aligner Configuration
 
-```c
-typedef struct {
-    size_t       struct_size;    /* Set by bt2_align_config_init(). */
-    const char  *index_path;    /* Path to index basename (required). */
-    int64_t      seed;          /* Random seed. Default: 0. */
-    int          nthreads;      /* Alignment threads. Default: 1. */
-    int          preset;        /* BT2_PRESET_*. Default: BT2_PRESET_SENSITIVE. */
-    int          local_align;   /* Nonzero for local alignment. Default: 0 (end-to-end). */
-    int          quiet;         /* Suppress log output. Default: 1. */
-    bt2_log_fn   log_fn;        /* Log callback. NULL to discard. */
-    void        *log_user_data; /* Passed to log_fn. */
-} bt2_align_config_t;
-```
+See `bt2_api.h` for the full struct definition. Key fields listed below.
 
 **`bt2_align_config_init(bt2_align_config_t *config)`**
 
@@ -164,18 +152,105 @@ Safe to call with NULL (no-op).
 
 When `local_align` is nonzero, the `-local` variant of each preset is used.
 
+#### Mate Orientation
+
+| Constant | Value | Equivalent CLI Flag |
+|----------|-------|-------------------|
+| `BT2_MATE_FR` | 0 | `--fr` (default) |
+| `BT2_MATE_RF` | 1 | `--rf` |
+| `BT2_MATE_FF` | 2 | `--ff` |
+
+#### Sentinel Convention
+
+Fields with default `-1` mean "use bowtie2's internal default" (which may vary
+by alignment mode or preset). Fields with default `0` mean "off/disabled".
+String fields with default `NULL` mean "not set".
+
 #### Field Details
 
-| Field | Required | Default | Notes |
-|-------|----------|---------|-------|
-| `index_path` | Yes | NULL | Basename of a bowtie2 index (e.g. `"path/to/genome"` for `genome.1.bt2` etc.) |
-| `seed` | No | 0 | Must be 0-2147483647. Controls random tie-breaking. |
-| `nthreads` | No | 1 | Number of alignment worker threads. |
-| `preset` | No | `BT2_PRESET_SENSITIVE` | Sensitivity/speed tradeoff. |
-| `local_align` | No | 0 | 0 = end-to-end, nonzero = local alignment. |
-| `quiet` | No | 1 | When 1 and `log_fn` is NULL, suppresses stderr/stdout output. |
-| `log_fn` | No | NULL | Receives all diagnostic output. See [Log Callback](#log-callback). |
-| `log_user_data` | No | NULL | Opaque pointer passed to `log_fn`. |
+**Core fields:**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `index_path` | NULL (required) | `-x` | Basename of a bowtie2 index |
+| `seed` | 0 | `--seed` | Must be 0-2147483647 |
+| `nthreads` | 1 | `-p` | Alignment worker threads |
+| `preset` | `BT2_PRESET_SENSITIVE` | see Presets | Sensitivity/speed tradeoff |
+| `local_align` | 0 | `--local` | 0 = end-to-end, nonzero = local |
+| `quiet` | 1 | `--quiet` | Suppresses output when `log_fn` is NULL |
+| `log_fn` | NULL | -- | Log callback. See [Log Callback](#log-callback) |
+| `log_user_data` | NULL | -- | Opaque pointer passed to `log_fn` |
+
+**Reporting:**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `k` | 0 (not set) | `-k` | Report up to k alignments per read. 0 = use default (1) |
+| `report_all` | 0 | `-a` | Report all alignments. MAPQ not meaningful |
+
+**Trimming:**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `trim5` | 0 | `--trim5` | Trim N bases from 5' end of each read |
+| `trim3` | 0 | `--trim3` | Trim N bases from 3' end of each read |
+
+**Scoring (sentinel -1 = mode-dependent default):**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `match_bonus` | -1 | `--ma` | Match bonus (0 for end-to-end, 2 for local) |
+| `mismatch_penalty` | -1 | `--mp` | Max mismatch penalty (default: 6) |
+| `n_penalty` | -1 | `--np` | Penalty for ambiguous chars (default: 1) |
+| `read_gap_open` | -1 | `--rdg` arg1 | Read gap open penalty (default: 5) |
+| `read_gap_extend` | -1 | `--rdg` arg2 | Read gap extend penalty (default: 3) |
+| `ref_gap_open` | -1 | `--rfg` arg1 | Ref gap open penalty (default: 5) |
+| `ref_gap_extend` | -1 | `--rfg` arg2 | Ref gap extend penalty (default: 3) |
+| `score_min` | NULL | `--score-min` | Min score function string, e.g. `"L,-0.6,-0.6"` |
+
+**Paired-end:**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `min_insert` | -1 | `-I` | Min fragment length (default: 0) |
+| `max_insert` | -1 | `-X` | Max fragment length (default: 500) |
+| `mate_orientation` | `BT2_MATE_FR` | `--fr/--rf/--ff` | See Mate Orientation |
+| `no_mixed` | 0 | `--no-mixed` | Suppress unpaired alignments for paired reads |
+| `no_discordant` | 0 | `--no-discordant` | Suppress discordant pair alignments |
+| `dovetail` | 0 | `--dovetail` | Allow dovetail mate overlap |
+| `no_contain` | 0 | `--no-contain` | Disallow one mate containing the other |
+| `no_overlap` | 0 | `--no-overlap` | Disallow any mate overlap |
+
+**Strand:**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `nofw` | 0 | `--nofw` | Don't align to forward strand |
+| `norc` | 0 | `--norc` | Don't align to reverse-complement strand |
+
+**Effort (sentinel -1 = preset-dependent default):**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `seed_mismatches` | -1 | `-N` | Max seed mismatches, 0 or 1 |
+| `seed_length` | -1 | `-L` | Seed substring length, 1-32 |
+| `max_dp_failures` | -1 | `-D` | Max consecutive extend failures before giving up |
+| `max_seed_rounds` | -1 | `-R` | Max rounds of seed searches |
+
+**SAM output:**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `no_unal` | 0 | `--no-unal` | Suppress unaligned reads in output |
+| `xeq` | 0 | `--xeq` | Use =/X instead of M in CIGAR strings |
+| `rg_id` | NULL | `--rg-id` | Read group ID. **Note:** passed to the aligner but `RG:Z` tags are not yet included in `bt2_align_output_t` structured output. |
+
+**Other:**
+
+| Field | Default | CLI | Notes |
+|-------|---------|-----|-------|
+| `ignore_quals` | 0 | `--ignore-quals` | Treat all qualities as Phred 30 |
+| `reorder` | 0 | `--reorder` | Preserve input order in output |
 
 ### Aligner Context Lifecycle
 

@@ -12,7 +12,9 @@
 
 struct bt2_align_ctx {
 	char *index_path_owned;     /* strdup'd copy of config.index_path */
-	bt2_align_config_t config;  /* shallow copy; index_path points to index_path_owned */
+	char *score_min_owned;      /* strdup'd copy of config.score_min, or NULL */
+	char *rg_id_owned;          /* strdup'd copy of config.rg_id, or NULL */
+	bt2_align_config_t config;  /* shallow copy; string ptrs point to owned copies */
 	char last_error[2048];
 };
 

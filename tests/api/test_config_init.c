@@ -45,6 +45,60 @@ int main(void) {
     assert(config.log_fn == NULL);
     assert(config.log_user_data == NULL);
 
+    /* --- New config option defaults --- */
+
+    /* Mate orientation enum constants */
+    assert(BT2_MATE_FR == 0);
+    assert(BT2_MATE_RF == 1);
+    assert(BT2_MATE_FF == 2);
+
+    /* Reporting */
+    assert(config.k == 0);
+    assert(config.report_all == 0);
+
+    /* Trimming */
+    assert(config.trim5 == 0);
+    assert(config.trim3 == 0);
+
+    /* Scoring — sentinel -1 means "use bowtie2 default" */
+    assert(config.match_bonus == -1);
+    assert(config.mismatch_penalty == -1);
+    assert(config.n_penalty == -1);
+    assert(config.read_gap_open == -1);
+    assert(config.read_gap_extend == -1);
+    assert(config.ref_gap_open == -1);
+    assert(config.ref_gap_extend == -1);
+    assert(config.score_min == NULL);
+
+    /* Paired-end */
+    assert(config.min_insert == -1);
+    assert(config.max_insert == -1);
+    assert(config.mate_orientation == BT2_MATE_FR);
+    assert(config.no_mixed == 0);
+    assert(config.no_discordant == 0);
+    assert(config.dovetail == 0);
+    assert(config.no_contain == 0);
+    assert(config.no_overlap == 0);
+
+    /* Strand */
+    assert(config.nofw == 0);
+    assert(config.norc == 0);
+
+    /* Effort — sentinel -1 means "preset-dependent" */
+    assert(config.seed_mismatches == -1);
+    assert(config.seed_length == -1);
+    assert(config.max_dp_failures == -1);
+    assert(config.max_seed_rounds == -1);
+
+    /* SAM output */
+    assert(config.no_unal == 0);
+    assert(config.xeq == 0);
+    assert(config.rg_id == NULL);
+
+    /* Other */
+    assert(config.ignore_quals == 0);
+    assert(config.reorder == 0);
+
     /* --- bt2_align_create validation tests --- */
 
     /* NULL config returns NULL with BT2_ERR_INVALID_CONFIG */
@@ -64,8 +118,17 @@ int main(void) {
     assert(bt2_align_create(&config, &err) == NULL);
     assert(err == BT2_ERR_INVALID_CONFIG);
 
+    /* k + report_all conflict returns BT2_ERR_INVALID_CONFIG */
+    bt2_align_config_init(&config);
+    config.index_path = "example/index/lambda_virus";
+    config.k = 5;
+    config.report_all = 1;
+    err = BT2_OK;
+    assert(bt2_align_create(&config, &err) == NULL);
+    assert(err == BT2_ERR_INVALID_CONFIG);
+
     /* NULL error_out is safe (doesn't crash) */
-    config.struct_size = sizeof(bt2_align_config_t);
+    bt2_align_config_init(&config);
     config.index_path = NULL;
     assert(bt2_align_create(&config, NULL) == NULL);
 

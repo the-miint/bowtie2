@@ -7,6 +7,7 @@
 #define BT2_DRIVER_API_H
 
 #include <string>
+#include "bt2_api.h"
 
 class PatternComposer;
 class AlnSink;
@@ -32,11 +33,15 @@ void driver_api_large(
 	AlnSink *api_sink);
 
 /*
- * Set statics from API config. Must be called under g_bowtie_mutex.
- * Calls resetOptions() first for a clean slate.
+ * Set statics from API config. Calls resetOptions() first for a clean slate,
+ * then builds an argv from config fields and calls parseOptions().
+ *
+ * THREAD SAFETY: writes to global statics (opterr, optind, all bowtie2
+ * option globals). Caller MUST hold g_bowtie_mutex. This function takes
+ * no lock itself.
  */
-void apply_config_to_statics(int nthreads, int64_t seed, int quiet,
-                             int preset, int local_align);
+void apply_config_to_statics(const bt2_align_config_t *config,
+                             int effective_quiet);
 
 /*
  * Returns true if the index at base path is a large (64-bit) index.

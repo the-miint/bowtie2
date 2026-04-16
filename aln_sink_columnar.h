@@ -76,7 +76,8 @@ public:
 		OutputQueue& oq,
 		const StrList& refnames,
 		bool quiet,
-		size_t nthreads);
+		size_t nthreads,
+		bool no_unal = false);
 
 	virtual ~AlnSinkColumnar() { }
 
@@ -132,6 +133,7 @@ private:
 		const Scoring&    sc);
 
 	std::vector<ColumnarThreadBuf> thread_bufs_;
+	bool no_unal_;
 };
 
 #endif /* ALN_SINK_COLUMNAR_H */

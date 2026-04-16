@@ -82,6 +82,13 @@ add_test(NAME api-test_build_then_align
   COMMAND test_build_then_align
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+# bench_api helper (used by performance benchmark)
+add_executable(bench_api bench_api.c)
+target_link_libraries(bench_api bowtie2-align-s-lib)
+set_target_properties(bench_api PROPERTIES
+  C_STANDARD 11
+  C_STANDARD_REQUIRED ON)
+
 # api_build helper (used by Python build comparison test)
 add_executable(api_build api_build.c)
 target_link_libraries(api_build bowtie2-build-s-lib)
@@ -109,4 +116,10 @@ if (Python3_FOUND)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(api-test-build-vs-native PROPERTIES
     DEPENDS "api-test_build_basic")
+
+  add_test(NAME api-test-options-vs-native
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_options_vs_native.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(api-test-options-vs-native PROPERTIES
+    DEPENDS "api-test_align_basic")
 endif()
