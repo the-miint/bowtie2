@@ -99,13 +99,15 @@ jobs:
           # when the target stops and then lldb exits.
           lldb -b \
             -o "settings set target.process.stop-on-exec false" \
+            -k "memory read -s 8 -c 8 -fx \$x0" \
+            -k "memory read -s 8 -c 8 -fx \$x1" \
+            -k "memory read -s 1 -c 64 -fx \$x0" \
+            -k "register read" \
+            -k "disassemble -n 'SStringExpandable<char, 1024, 2, 1024>::operator='" \
             -k "thread list" \
             -k "thread backtrace all" \
-            -k "register read" \
             -k "frame select 0" \
-            -k "frame variable --show-types --show-globals" \
-            -k "disassemble -n 'SStringExpandable<char, 1024, 2, 1024>::operator='" \
-            -k "disassemble -p -c 40" \
+            -k "frame variable --show-types" \
             -k "frame select 1" \
             -k "frame variable --show-types" \
             -k "frame select 2" \
@@ -114,12 +116,8 @@ jobs:
             -k "frame variable --show-types" \
             -k "frame select 4" \
             -k "frame variable --show-types" \
-            -k "image lookup -a 0x10" \
-            -k "image lookup --regex --name 'MemoryPatternSource.*nextBatch'" \
-            -k "memory read -s 8 -c 8 -fx \$x0" \
-            -k "memory read -s 8 -c 8 -fx \$x1" \
-            -k "expression -- *(void**)\$x0" \
-            -k "expression -- *(void**)\$x1" \
+            -k "frame select 5" \
+            -k "frame variable --show-types" \
             -o "run $*" \
             -- "$BIN" \
             2>&1 | tee -a /tmp/lldb-output.txt
