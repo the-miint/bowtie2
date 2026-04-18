@@ -127,11 +127,13 @@ jobs:
           chmod +x /tmp/lldb-wrap.sh
           : > /tmp/lldb-output.txt
 
-          # Let cargo find and build the test. `-- --exact` pins the
-          # name. `--test-threads=1` reproduces the condition from the
+          # Let cargo find and build the test. Substring match on the
+          # leaf name (no --exact, which would need the full module
+          # path `tools::bowtie2_align::tests::...`).
+          # `--test-threads=1` reproduces the condition from the
           # GPL-boundary reply doc.
           cargo test test_bowtie2_align_single_end_fastq_roundtrip \
-            -- --exact --test-threads=1 --nocapture \
+            -- --test-threads=1 --nocapture \
             || echo "cargo test exited non-zero (expected on crash)"
 
           # Copy to a workspace-relative path so upload-artifact finds it.
