@@ -82,6 +82,16 @@ add_test(NAME api-test_build_then_align
   COMMAND test_build_then_align
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+# Reproducer for GPL-boundary macOS aarch64 SIGSEGV with all-N + no_unal
+add_executable(test_repro_no_unal_all_n test_repro_no_unal_all_n.c)
+target_link_libraries(test_repro_no_unal_all_n bowtie2-combined-s-lib)
+set_target_properties(test_repro_no_unal_all_n PROPERTIES
+  C_STANDARD 11
+  C_STANDARD_REQUIRED ON)
+add_test(NAME api-test_repro_no_unal_all_n
+  COMMAND test_repro_no_unal_all_n
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
 # bench_api helper (used by performance benchmark)
 add_executable(bench_api bench_api.c)
 target_link_libraries(bench_api bowtie2-align-s-lib)

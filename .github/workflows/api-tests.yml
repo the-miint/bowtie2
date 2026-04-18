@@ -4,12 +4,14 @@ on:
     branches:
       - 'master'
       - 'feature/reentrant-api'
+      - 'v2.5.5-miint'
     paths:
       - '**.h'
       - '**.cpp'
       - '**.c'
       - '**/CMakeLists.txt'
       - 'tests/api/**'
+      - '.github/workflows/api-tests.yml'
   pull_request:
     branches:
       - 'master'
@@ -19,6 +21,8 @@ on:
       - '**.c'
       - '**/CMakeLists.txt'
       - 'tests/api/**'
+      - '.github/workflows/api-tests.yml'
+  workflow_dispatch:
 jobs:
   linux:
     runs-on: ubuntu-latest
@@ -43,12 +47,36 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      # Build RelWithDebInfo so any crash backtrace has symbols without
+      # paying the full Debug build cost.
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.ncpu)
+      # Run the crash reproducer in isolation under lldb so if it
+      # SIGSEGVs (see localdocs/ISSUE-bowtie2-sigsegv-macos-aarch64.md)
+      # we capture a backtrace in CI logs instead of just "Abort trap".
+      # `--batch -k` runs when a signal is raised; `-o quit` exits after.
+      - name: Run repro (all-N + no_unal) under lldb
+        working-directory: build
+        run: |
+          set -x
+          BIN=tests/api/test_repro_no_unal_all_n
+          if [ ! -x "$BIN" ]; then BIN=tests/api/test_repro_no_unal_all_n-debug; fi
+          lldb -b \
+            -o "settings set target.process.stop-on-exec false" \
+            -o "run" \
+            -o "bt all" \
+            -o "register read" \
+            -o "image list" \
+            -o "quit" \
+            -- "$BIN" || true
+          # Fail the step if the binary itself crashes.
+          "$BIN"
+          echo "repro exit=$?"
       - name: Run all tests
-        run: cd build && ctest --output-on-failure --timeout 120
+        working-directory: build
+        run: ctest --output-on-failure --timeout 120
 
   sanitizer-asan:
     runs-on: ubuntu-latest
@@ -64,6 +92,23 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON
       - name: Build
         run: cmake --build build -j$(nproc)
+      - name: Run API tests under ASan
+        run: cd build && ctest -R api-test --output-on-failure --timeout 300
+
+  # ASan on macOS aarch64 — the platform that actually crashes in
+  # localdocs/ISSUE-bowtie2-sigsegv-macos-aarch64.md. Running ASan on
+  # the crashing platform is the most likely place to surface a diagnosis
+  # (the x86_64 ASan job above does not reproduce the fault).
+  sanitizer-asan-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Configure (ASan)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
       - name: Run API tests under ASan
         run: cd build && ctest -R api-test --output-on-failure --timeout 300
 
