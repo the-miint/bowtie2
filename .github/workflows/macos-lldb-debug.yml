@@ -1,0 +1,174 @@
+name: macOS lldb SIGSEGV debug
+
+# Runs the GPL-boundary failing Rust test on macOS aarch64 under lldb and
+# prints one comprehensive dump (threads, frames, registers, disassembly,
+# memory around the fault, symbol lookups). Single job, one artifact,
+# done.
+#
+# Triggers only on the debug branch or manual dispatch so this job does
+# not run on normal PRs.
+
+on:
+  push:
+    branches:
+      - 'debug/macos-lldb-dump'
+  workflow_dispatch:
+
+jobs:
+  lldb-dump:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout bowtie2 (current branch)
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          path: bowtie2
+
+      - name: Checkout GPL-boundary @ add-bowtie2-align
+        uses: actions/checkout@v4
+        with:
+          repository: the-miint/GPL-boundary
+          ref: add-bowtie2-align
+          path: gpl-boundary
+          # Don't pull submodules — we'll replace ext/bowtie2 with our
+          # local checkout below. sortmerna uses an ssh URL that would
+          # fail here anyway and we don't need it.
+          submodules: false
+
+      - name: Swap in our bowtie2 checkout
+        run: |
+          set -euxo pipefail
+          rm -rf gpl-boundary/ext/bowtie2
+          cp -R bowtie2 gpl-boundary/ext/bowtie2
+          # The cp includes .git etc; that's fine, build.rs only reads source.
+          git -C gpl-boundary/ext/bowtie2 rev-parse HEAD
+
+      - name: Stub unused submodules so build.rs links succeed
+        run: |
+          set -euxo pipefail
+          # fasttree / prodigal / sortmerna are required by build.rs but
+          # irrelevant for the bowtie2 test. Clone fasttree and prodigal
+          # (public, HTTPS). sortmerna is ssh-only — stub out its build
+          # step by commenting it out in build.rs only if needed.
+          cd gpl-boundary
+          git submodule update --init ext/fasttree ext/prodigal 2>&1 || {
+            echo "--- submodule update failed, cloning directly ---"
+            rm -rf ext/fasttree ext/prodigal
+            git clone --depth 1 --branch v2.3.0-miint https://github.com/the-miint/fasttree.git ext/fasttree
+            git clone --depth 1 --branch v2.6.4-miint https://github.com/the-miint/prodigal.git ext/prodigal
+          }
+          # sortmerna uses SSH; replace the URL and try HTTPS.
+          git submodule set-url ext/sortmerna https://github.com/the-miint/sortmerna.git
+          git submodule update --init ext/sortmerna 2>&1 || {
+            echo "--- sortmerna clone failed — may need build.rs stub ---"
+            exit 1
+          }
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system deps
+        run: brew install rocksdb zlib
+
+      - name: Build tests (debug, no optimization, full symbols)
+        working-directory: gpl-boundary
+        env:
+          # bowtie2 compilation: full symbols, no opt (build.rs already
+          # picks opt_level=0 on macos-aarch64; reinforce with -g3).
+          CFLAGS: "-g3 -fno-omit-frame-pointer"
+          CXXFLAGS: "-g3 -fno-omit-frame-pointer"
+          # Rust: full debuginfo (dev profile already does this)
+          RUSTFLAGS: "-C debuginfo=2 -C force-frame-pointers=yes"
+        run: |
+          set -euxo pipefail
+          # --message-format=json so we can find the test binaries
+          # reliably; pipe through a filter that preserves build output
+          # for the log.
+          cargo test --no-run --message-format=json-render-diagnostics \
+            > cargo-build.json 2> cargo-build.err || {
+              tail -100 cargo-build.err
+              exit 1
+            }
+          # Extract paths of all test executables
+          grep -oE '"executable":"[^"]*"' cargo-build.json \
+            | sed 's/"executable":"//;s/"$//' \
+            | grep -v null \
+            | sort -u \
+            > test-binaries.txt
+          cat test-binaries.txt
+
+      - name: Find the test binary that contains our test
+        working-directory: gpl-boundary
+        id: find-bin
+        run: |
+          set -euxo pipefail
+          TARGET_TEST="tools::bowtie2_align::tests::test_bowtie2_align_single_end_fastq_roundtrip"
+          FOUND=""
+          while read bin; do
+            if "$bin" --list 2>/dev/null | grep -qF "$TARGET_TEST"; then
+              FOUND="$bin"
+              break
+            fi
+          done < test-binaries.txt
+          if [ -z "$FOUND" ]; then
+            echo "!!! no test binary contained $TARGET_TEST"
+            echo "--- available tests in each binary ---"
+            while read bin; do
+              echo "=== $bin ==="
+              "$bin" --list 2>&1 | head -20 || true
+            done < test-binaries.txt
+            exit 1
+          fi
+          echo "test_bin=$FOUND" >> "$GITHUB_OUTPUT"
+          echo "Found: $FOUND"
+
+      - name: Run under lldb with comprehensive dump
+        working-directory: gpl-boundary
+        run: |
+          set -x
+          TEST_BIN="${{ steps.find-bin.outputs.test_bin }}"
+          TARGET_TEST="tools::bowtie2_align::tests::test_bowtie2_align_single_end_fastq_roundtrip"
+
+          # One shot: run the test, capture EVERY datum we might want
+          # at the crash frame. If the process doesn't crash, lldb's
+          # follow-on commands still run after process exits and mostly
+          # print errors — that's fine and distinguishable in the log.
+          # lldb prompts "(lldb) <command>" in batch mode, so the
+          # commands themselves delineate sections in the output.
+          lldb -b \
+            -o "settings set target.process.stop-on-exec false" \
+            -o "run --exact --test-threads=1 $TARGET_TEST" \
+            -o "thread list" \
+            -o "thread backtrace all" \
+            -o "register read" \
+            -o "frame select 0" \
+            -o "frame variable --show-types --show-globals" \
+            -o "disassemble -p -c 40" \
+            -o "frame select 1" \
+            -o "frame variable --show-types" \
+            -o "frame select 2" \
+            -o "frame variable --show-types" \
+            -o "frame select 3" \
+            -o "frame variable --show-types" \
+            -o "frame select 4" \
+            -o "frame variable --show-types" \
+            -o "image lookup -a 0x10" \
+            -o "image lookup --regex --name 'MemoryPatternSource.*nextBatch'" \
+            -o "image list" \
+            -o "quit" \
+            -- "$TEST_BIN" \
+            2>&1 | tee lldb-output.txt
+
+          # Fail the job iff the process crashed — the dump is the
+          # point, so we still want the log even on pass.
+          if grep -qE "stop reason = EXC_BAD_ACCESS|SIGSEGV|signal SIGBUS" lldb-output.txt; then
+            echo "::error::Test crashed with EXC_BAD_ACCESS / SIGSEGV (as expected)"
+            exit 1
+          fi
+          echo "::warning::Test did NOT crash — the bug did not reproduce in this build"
+
+      - name: Upload lldb output as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lldb-output
+          path: gpl-boundary/lldb-output.txt
