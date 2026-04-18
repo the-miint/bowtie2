@@ -93,27 +93,29 @@ jobs:
           set -x
           BIN="$1"; shift
           # lldb's `run` takes args after the verb. Pass through.
+          # -o commands run pre-launch and are NOT run after the
+          # inferior crashes in batch mode; post-crash diagnostics
+          # must go in -k (one-line-on-crash) commands, which fire
+          # when the target stops and then lldb exits.
           lldb -b \
             -o "settings set target.process.stop-on-exec false" \
+            -k "thread list" \
+            -k "thread backtrace all" \
+            -k "register read" \
+            -k "frame select 0" \
+            -k "frame variable --show-types --show-globals" \
+            -k "disassemble -p -c 40" \
+            -k "frame select 1" \
+            -k "frame variable --show-types" \
+            -k "frame select 2" \
+            -k "frame variable --show-types" \
+            -k "frame select 3" \
+            -k "frame variable --show-types" \
+            -k "frame select 4" \
+            -k "frame variable --show-types" \
+            -k "image lookup -a 0x10" \
+            -k "image lookup --regex --name 'MemoryPatternSource.*nextBatch'" \
             -o "run $*" \
-            -o "thread list" \
-            -o "thread backtrace all" \
-            -o "register read" \
-            -o "frame select 0" \
-            -o "frame variable --show-types --show-globals" \
-            -o "disassemble -p -c 40" \
-            -o "frame select 1" \
-            -o "frame variable --show-types" \
-            -o "frame select 2" \
-            -o "frame variable --show-types" \
-            -o "frame select 3" \
-            -o "frame variable --show-types" \
-            -o "frame select 4" \
-            -o "frame variable --show-types" \
-            -o "image lookup -a 0x10" \
-            -o "image lookup --regex --name 'MemoryPatternSource.*nextBatch'" \
-            -o "image list" \
-            -o "quit" \
             -- "$BIN" \
             2>&1 | tee -a /tmp/lldb-output.txt
           # Exit non-zero only if the child crashed — the lldb dump is
