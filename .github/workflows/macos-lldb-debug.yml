@@ -94,10 +94,6 @@ jobs:
           # --- Pre-run setup ------------------------------------------
           settings set target.process.stop-on-exec false
 
-          # Look up vtable symbols. Duplicate symbols here would
-          # indicate a link-time issue (e.g. two copies of bowtie2).
-          image lookup --regex --name "^_ZTV.*SStringExpand"
-
           # Set a breakpoint at MemoryPatternSource::nextBatchImpl
           # entry. We want to know if readOrigBuf's vtable is already
           # zero when this function starts — that would mean the
@@ -105,7 +101,6 @@ jobs:
           breakpoint set --name MemoryPatternSource::nextBatchImpl --auto-continue true
           breakpoint command add 1 -s lldb
           script print("\n=== BP1: nextBatchImpl ENTRY ===")
-          frame variable pt -T
           frame variable pt.bufa_.list_[0].readOrigBuf -T
           script print("=== end BP1 ===\n")
           DONE
@@ -118,19 +113,6 @@ jobs:
           frame variable this->buf_.bufa_.list_[0].readOrigBuf -T
           script print("=== end BP2 ===\n")
           DONE
-
-          # Set a breakpoint at readAsync entry. First hit is BEFORE any
-          # PatternSourcePerThread has been used. If Reads are already
-          # corrupt here, the factory's construction of PatternSourcePerThreads
-          # itself is broken.
-          breakpoint set --name PatternSourceReadAheadFactory::readAsync --auto-continue true
-          breakpoint command add 3 -s lldb
-          script print("\n=== BP3: readAsync ENTRY ===")
-          frame variable obj -T
-          script print("=== end BP3 ===\n")
-          DONE
-
-          image list
 
           run RUN_ARGS_PLACEHOLDER
 
@@ -153,6 +135,8 @@ jobs:
           frame variable --show-types
           frame select 4
           frame variable --show-types
+          image lookup --regex --name _ZTV.*SStringExpand
+          image list
           quit
           LLDB
 
