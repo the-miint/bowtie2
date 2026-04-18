@@ -102,6 +102,9 @@ jobs:
             -k "memory read -s 8 -c 8 -fx \$x0" \
             -k "memory read -s 8 -c 8 -fx \$x1" \
             -k "memory read -s 1 -c 64 -fx \$x0" \
+            -k "memory read -s 8 -c 128 -fx \$x0" \
+            -k "expression (void*)\$x0 - 0x120" \
+            -k "memory read -s 8 -c 64 -fx \$x0 - 0x120" \
             -k "register read" \
             -k "disassemble -n 'SStringExpandable<char, 1024, 2, 1024>::operator='" \
             -k "thread list" \
