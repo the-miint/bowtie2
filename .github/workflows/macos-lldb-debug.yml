@@ -84,49 +84,88 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Write the runner. cargo invokes it as:
+          # Write the lldb command script. Using --source (not a pile
+          # of -o/-k flags) because:
+          #   1. the script runs commands sequentially across process
+          #      stops (breakpoints AND the final crash), so we can
+          #      dump state at several intermediate points.
+          #   2. breakpoint commands + auto-continue work reliably.
+          cat > /tmp/lldb-script.lldb <<'LLDB'
+          # --- Pre-run setup ------------------------------------------
+          settings set target.process.stop-on-exec false
+
+          # Look up vtable symbols. Duplicate symbols here would
+          # indicate a link-time issue (e.g. two copies of bowtie2).
+          image lookup --regex --name "^_ZTV.*SStringExpand"
+
+          # Set a breakpoint at MemoryPatternSource::nextBatchImpl
+          # entry. We want to know if readOrigBuf's vtable is already
+          # zero when this function starts — that would mean the
+          # corruption happened upstream.
+          breakpoint set --name MemoryPatternSource::nextBatchImpl --auto-continue true
+          breakpoint command add 1 -s lldb
+          script print("\n=== BP1: nextBatchImpl ENTRY ===")
+          frame variable pt -T
+          frame variable pt.bufa_.list_[0].readOrigBuf -T
+          script print("=== end BP1 ===\n")
+          DONE
+
+          # Set a breakpoint at PatternSourcePerThread::nextBatch
+          # entry — one level upstream, before buf_.reset() is called.
+          breakpoint set --name PatternSourcePerThread::nextBatch --auto-continue true
+          breakpoint command add 2 -s lldb
+          script print("\n=== BP2: PSP::nextBatch ENTRY ===")
+          frame variable this->buf_.bufa_.list_[0].readOrigBuf -T
+          script print("=== end BP2 ===\n")
+          DONE
+
+          # Set a breakpoint at readAsync entry. First hit is BEFORE any
+          # PatternSourcePerThread has been used. If Reads are already
+          # corrupt here, the factory's construction of PatternSourcePerThreads
+          # itself is broken.
+          breakpoint set --name PatternSourceReadAheadFactory::readAsync --auto-continue true
+          breakpoint command add 3 -s lldb
+          script print("\n=== BP3: readAsync ENTRY ===")
+          frame variable obj -T
+          script print("=== end BP3 ===\n")
+          DONE
+
+          image list
+
+          run RUN_ARGS_PLACEHOLDER
+
+          # --- Post-crash section -------------------------------------
+          # When `run` unblocks (because the process crashed), these
+          # execute against the stopped inferior.
+          script print("\n=== POST-CRASH DIAGNOSTICS ===")
+          thread list
+          thread backtrace all
+          register read
+          frame select 0
+          frame variable --show-types --show-globals
+          memory read -s 8 -c 8 -fx $x0
+          memory read -s 8 -c 128 -fx $x0
+          frame select 1
+          frame variable --show-types
+          frame select 2
+          frame variable --show-types
+          frame select 3
+          frame variable --show-types
+          frame select 4
+          frame variable --show-types
+          quit
+          LLDB
+
+          # Write the cargo runner wrapper. cargo invokes it as:
           #   lldb-wrap.sh /path/to/test-bin <arg1> <arg2> ...
-          # We launch the binary under lldb with those args and dump
-          # every diagnostic we might want on crash or exit.
           cat > /tmp/lldb-wrap.sh <<'WRAP'
           #!/bin/bash
           set -x
           BIN="$1"; shift
-          # lldb's `run` takes args after the verb. Pass through.
-          # -o commands run pre-launch and are NOT run after the
-          # inferior crashes in batch mode; post-crash diagnostics
-          # must go in -k (one-line-on-crash) commands, which fire
-          # when the target stops and then lldb exits.
-          lldb -b \
-            -o "settings set target.process.stop-on-exec false" \
-            -k "memory read -s 8 -c 8 -fx \$x0" \
-            -k "memory read -s 8 -c 8 -fx \$x1" \
-            -k "memory read -s 1 -c 64 -fx \$x0" \
-            -k "memory read -s 8 -c 128 -fx \$x0" \
-            -k "expression (void*)\$x0 - 0x120" \
-            -k "memory read -s 8 -c 64 -fx \$x0 - 0x120" \
-            -k "register read" \
-            -k "disassemble -n 'SStringExpandable<char, 1024, 2, 1024>::operator='" \
-            -k "thread list" \
-            -k "thread backtrace all" \
-            -k "frame select 0" \
-            -k "frame variable --show-types" \
-            -k "frame select 1" \
-            -k "frame variable --show-types" \
-            -k "frame select 2" \
-            -k "frame variable --show-types" \
-            -k "frame select 3" \
-            -k "frame variable --show-types" \
-            -k "frame select 4" \
-            -k "frame variable --show-types" \
-            -k "frame select 5" \
-            -k "frame variable --show-types" \
-            -o "run $*" \
-            -- "$BIN" \
-            2>&1 | tee -a /tmp/lldb-output.txt
-          # Exit non-zero only if the child crashed — the lldb dump is
-          # the payload so we always want the log. cargo uses exit code
-          # to decide test pass/fail.
+          # Substitute test args into the lldb script's `run` line.
+          sed "s|RUN_ARGS_PLACEHOLDER|$*|" /tmp/lldb-script.lldb > /tmp/lldb-script-run.lldb
+          lldb -b --source /tmp/lldb-script-run.lldb -- "$BIN" 2>&1 \
+              | tee -a /tmp/lldb-output.txt
           if grep -qE "stop reason = EXC_BAD_ACCESS|SIGSEGV|signal SIGBUS" /tmp/lldb-output.txt; then
             exit 139
           fi
