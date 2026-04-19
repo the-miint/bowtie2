@@ -114,27 +114,9 @@ jobs:
           script print("=== end BP2 ===\n")
           DONE
 
-          # BP3: did SStringExpandable<char,1024,2,1024>'s ctor run?
-          # Limited to first hit — one dump is enough.
-          breakpoint set --name 'SStringExpandable<char, 1024, 2, 1024>::SStringExpandable' --one-shot true --auto-continue true
-          breakpoint command add 3 -s command
-          script print("\n=== BP3: SStringExpandable<char,1024,2,1024>::ctor FIRED ===")
-          register read x0
-          thread backtrace
-          script print("--- disassembly of this ctor ---")
-          disassemble -c 30
-          script print("=== end BP3 ===\n")
-          DONE
-
-          # BP4: Read::Read default ctor — disassemble to see what
-          # compiles. One-shot.
-          breakpoint set --name 'Read::Read()' --one-shot true --auto-continue true
-          breakpoint command add 4 -s command
-          script print("\n=== BP4: Read::Read() FIRED ===")
-          thread backtrace
-          disassemble -c 30
-          script print("=== end BP4 ===\n")
-          DONE
+          # BP3/BP4 removed — we confirmed ctors fire but compiler
+          # elides vtable stores. Now testing the fix: noinline+optnone
+          # on Read::Read should force proper ctor codegen.
 
           run RUN_ARGS_PLACEHOLDER
 
