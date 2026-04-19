@@ -48,21 +48,27 @@ jobs:
           set -euxo pipefail
           # We moved Read's ctors out-of-line into read.cpp to fix a
           # clang inlining pathology. GPL-boundary's build.rs has an
-          # explicit source list; inject read.cpp into the "shared"
-          # list so the Rust test binary picks up the out-of-line
-          # definitions.
+          # explicit source list for bowtie2; inject read.cpp into the
+          # "shared_files" list (after random_source.cpp) so the Rust
+          # test binary picks up the out-of-line definitions.
+          #
+          # Note: sortmerna has its own unrelated "read.cpp" in the
+          # same build.rs, so we can't just check for the string's
+          # presence — anchor on the bowtie2-specific line.
           python3 - <<'PY'
-          import re
           p = "gpl-boundary/build.rs"
           s = open(p).read()
-          if '"read.cpp"' in s:
-              print("read.cpp already present — no patch needed")
+          anchor = '        "random_source.cpp",'  # bowtie2 shared_files last entry
+          if anchor not in s:
+              raise SystemExit("anchor not found — build.rs layout changed")
+          # Check if already patched (read.cpp already after the anchor)
+          after = s.split(anchor, 1)[1]
+          if after.lstrip().startswith('"read.cpp"'):
+              print("already patched — read.cpp immediately follows anchor")
           else:
-              # Insert right after "random_source.cpp",
-              s2 = s.replace('"random_source.cpp",', '"random_source.cpp",\n        "read.cpp",', 1)
-              assert s != s2, "substitution failed: random_source.cpp not found"
+              s2 = s.replace(anchor, anchor + '\n        "read.cpp",', 1)
               open(p, 'w').write(s2)
-              print("patched build.rs with read.cpp")
+              print("patched build.rs: added read.cpp to bowtie2 shared_files")
           PY
           grep -n 'read.cpp' gpl-boundary/build.rs
 
