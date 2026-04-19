@@ -40,26 +40,16 @@ struct Read {
 
 	typedef SStringExpandable<char, 1024, 2, 1024> TBuf;
 
-	// Option 3 diagnostic: optnone + noinline on the ctors.
-	// Works around a clang codegen pathology on macOS aarch64 when
-	// Read::Read is inlined into new Read[] via EList::alloc: the
-	// compiler collapses the member ctors and reset() into a sparse
-	// series of byte stores and elides the vtable initialization.
-	// Ship-quality fix is option 1 (move out of header); this just
-	// proves the hypothesis.
-#if defined(__clang__)
-	__attribute__((optnone, noinline))
-#elif defined(__GNUC__)
-	__attribute__((noinline))
-#endif
-	Read() { reset(); }
-
-#if defined(__clang__)
-	__attribute__((optnone, noinline))
-#elif defined(__GNUC__)
-	__attribute__((noinline))
-#endif
-	Read(const char *nm, const char *seq, const char *ql) { init(nm, seq, ql); }
+	// Constructors are out-of-line (see read.cpp) to work around a
+	// clang codegen pathology on macOS aarch64: when Read::Read is
+	// inlined into new Read[] via EList::alloc, the compiler
+	// collapses the implicit SStringExpandable member ctors and
+	// reset() into a sparse series of byte stores and elides the
+	// vtable initialization, leaving Reads with null vtables.
+	// Keeping the definitions in a .cpp file prevents the compiler
+	// from inlining them into array-new call sites.
+	Read();
+	Read(const char *nm, const char *seq, const char *ql);
 
 	void reset() {
 		rdid = 0;

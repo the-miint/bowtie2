@@ -43,6 +43,29 @@ jobs:
           # The cp includes .git etc; that's fine, build.rs only reads source.
           git -C gpl-boundary/ext/bowtie2 rev-parse HEAD
 
+      - name: Patch GPL-boundary build.rs to include our new read.cpp
+        run: |
+          set -euxo pipefail
+          # We moved Read's ctors out-of-line into read.cpp to fix a
+          # clang inlining pathology. GPL-boundary's build.rs has an
+          # explicit source list; inject read.cpp into the "shared"
+          # list so the Rust test binary picks up the out-of-line
+          # definitions.
+          python3 - <<'PY'
+          import re
+          p = "gpl-boundary/build.rs"
+          s = open(p).read()
+          if '"read.cpp"' in s:
+              print("read.cpp already present — no patch needed")
+          else:
+              # Insert right after "random_source.cpp",
+              s2 = s.replace('"random_source.cpp",', '"random_source.cpp",\n        "read.cpp",', 1)
+              assert s != s2, "substitution failed: random_source.cpp not found"
+              open(p, 'w').write(s2)
+              print("patched build.rs with read.cpp")
+          PY
+          grep -n 'read.cpp' gpl-boundary/build.rs
+
       - name: Stub unused submodules so build.rs links succeed
         run: |
           set -euxo pipefail

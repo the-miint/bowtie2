@@ -92,6 +92,7 @@ set(SHARED_CPPS
   multikey_qsort.cpp
   limit.cpp
   random_source.cpp
+  read.cpp
   )
 
 set(SEARCH_CPPS
