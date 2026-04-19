@@ -114,22 +114,28 @@ jobs:
           script print("=== end BP2 ===\n")
           DONE
 
-          # BP3: did Read's default ctor actually run?
-          # Read() { reset(); } — if this fires, ctor ran.
-          # If this never fires, the Read array was allocated
-          # without invoking Read's default ctor.
-          breakpoint set --name Read::Read --auto-continue true
-          breakpoint command add 3 -s command
-          script print("\n=== BP3: Read::Read() FIRED ===")
-          DONE
+          # BP3 removed — we confirmed it fires ~320 times previously.
 
           # BP4: did SStringExpandable<char,1024,2,1024>'s ctor run?
-          # If Read ctor ran, this MUST also fire (readOrigBuf member
-          # init). If this never fires, we have our smoking gun.
-          breakpoint set --name 'SStringExpandable<char, 1024, 2, 1024>::SStringExpandable' --auto-continue true
+          # Limited to first hit — one dump is enough.
+          breakpoint set --name 'SStringExpandable<char, 1024, 2, 1024>::SStringExpandable' --one-shot true --auto-continue true
           breakpoint command add 4 -s command
           script print("\n=== BP4: SStringExpandable<char,1024,2,1024>::ctor FIRED ===")
           register read x0
+          thread backtrace
+          script print("--- disassembly of this ctor ---")
+          disassemble -c 30
+          script print("=== end BP4 ===\n")
+          DONE
+
+          # BP5: Read::Read default ctor — disassemble to see what
+          # compiles. One-shot.
+          breakpoint set --name 'Read::Read()' --one-shot true --auto-continue true
+          breakpoint command add 5 -s command
+          script print("\n=== BP5: Read::Read() FIRED ===")
+          thread backtrace
+          disassemble -c 30
+          script print("=== end BP5 ===\n")
           DONE
 
           run RUN_ARGS_PLACEHOLDER
