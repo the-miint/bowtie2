@@ -99,7 +99,7 @@ jobs:
           # zero when this function starts — that would mean the
           # corruption happened upstream.
           breakpoint set --name MemoryPatternSource::nextBatchImpl --auto-continue true
-          breakpoint command add 1 -s lldb
+          breakpoint command add 1 -s command
           script print("\n=== BP1: nextBatchImpl ENTRY ===")
           frame variable pt.bufa_.list_[0].readOrigBuf -T
           script print("=== end BP1 ===\n")
@@ -108,7 +108,7 @@ jobs:
           # Set a breakpoint at PatternSourcePerThread::nextBatch
           # entry — one level upstream, before buf_.reset() is called.
           breakpoint set --name PatternSourcePerThread::nextBatch --auto-continue true
-          breakpoint command add 2 -s lldb
+          breakpoint command add 2 -s command
           script print("\n=== BP2: PSP::nextBatch ENTRY ===")
           frame variable this->buf_.bufa_.list_[0].readOrigBuf -T
           script print("=== end BP2 ===\n")
