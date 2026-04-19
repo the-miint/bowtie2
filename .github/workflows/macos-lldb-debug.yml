@@ -71,6 +71,14 @@ jobs:
               print("patched build.rs: added read.cpp to bowtie2 shared_files")
           PY
           grep -n 'read.cpp' gpl-boundary/build.rs
+          # Verify our read.cpp physically exists where build.rs will
+          # look for it — if it doesn't, the patch is useless.
+          ls -la gpl-boundary/ext/bowtie2/read.cpp
+          head -5 gpl-boundary/ext/bowtie2/read.cpp
+          # Confirm the INLINE definitions were removed from read.h too —
+          # if both inline + out-of-line defs are present, the inline
+          # one still gets emitted per TU and may still be used.
+          grep -cE 'Read\(\) \{ reset\(\); \}|Read\(const char' gpl-boundary/ext/bowtie2/read.h
 
       - name: Stub unused submodules so build.rs links succeed
         run: |
@@ -143,9 +151,16 @@ jobs:
           script print("=== end BP2 ===\n")
           DONE
 
-          # BP3/BP4 removed — we confirmed ctors fire but compiler
-          # elides vtable stores. Now testing the fix: noinline+optnone
-          # on Read::Read should force proper ctor codegen.
+          # BP5: disassemble Read::Read — verify out-of-line version
+          # contains proper member ctor calls.
+          breakpoint set --name 'Read::Read()' --one-shot true --auto-continue true
+          breakpoint command add 3 -s command
+          script print("\n=== BP5: Read::Read() disassembly ===")
+          thread backtrace
+          script print("--- function start ---")
+          disassemble -F intel -c 60
+          script print("=== end BP5 ===\n")
+          DONE
 
           run RUN_ARGS_PLACEHOLDER
 
