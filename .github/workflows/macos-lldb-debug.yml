@@ -114,6 +114,24 @@ jobs:
           script print("=== end BP2 ===\n")
           DONE
 
+          # BP3: did Read's default ctor actually run?
+          # Read() { reset(); } — if this fires, ctor ran.
+          # If this never fires, the Read array was allocated
+          # without invoking Read's default ctor.
+          breakpoint set --name Read::Read --auto-continue true
+          breakpoint command add 3 -s command
+          script print("\n=== BP3: Read::Read() FIRED ===")
+          DONE
+
+          # BP4: did SStringExpandable<char,1024,2,1024>'s ctor run?
+          # If Read ctor ran, this MUST also fire (readOrigBuf member
+          # init). If this never fires, we have our smoking gun.
+          breakpoint set --name 'SStringExpandable<char, 1024, 2, 1024>::SStringExpandable' --auto-continue true
+          breakpoint command add 4 -s command
+          script print("\n=== BP4: SStringExpandable<char,1024,2,1024>::ctor FIRED ===")
+          register read x0
+          DONE
+
           run RUN_ARGS_PLACEHOLDER
 
           # --- Post-crash section -------------------------------------
