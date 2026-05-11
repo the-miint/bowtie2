@@ -323,6 +323,35 @@ void AlnSinkColumnar::appendMate(
 		buf.tag_yt.push_back(yt);
 	}
 
+	/* YS:i — opposite mate's alignment score. INT32_MIN when not in a paired
+	   alignment (mirrors tag_xs sentinel). Belt-and-suspenders on
+	   oscore().valid() — SAM-text path asserts it under summ.paired() but we
+	   keep the runtime guard for Release builds where the assert is compiled out. */
+	if(rs != NULL && summ.paired() && rs->oscore().valid()) {
+		buf.tag_ys.push_back((int32_t)rs->oscore().score());
+	} else {
+		buf.tag_ys.push_back(INT32_MIN);
+	}
+
+	/* XN:i — ambiguous bases in covered reference */
+	if(rs != NULL) {
+		buf.tag_xn.push_back((int32_t)rs->refNs());
+	} else {
+		buf.tag_xn.push_back(0);
+	}
+
+	/* XM/XO/XG — mismatches, gap opens, gap extensions. Shared helper with
+	   sam.cpp guarantees byte-parity with the SAM text sink. */
+	{
+		size_t num_mm = 0, num_go = 0, num_gx = 0;
+		if(rs != NULL) {
+			count_mm_go_gx(*rs, num_mm, num_go, num_gx);
+		}
+		buf.tag_xm.push_back((int32_t)num_mm);
+		buf.tag_xo.push_back((int32_t)num_go);
+		buf.tag_xg.push_back((int32_t)num_gx);
+	}
+
 	/* Read ID for ordering */
 	buf.rdids.push_back((uint64_t)rdid);
 }
@@ -390,7 +419,7 @@ bt2_align_output_t *AlnSinkColumnar::finalize() {
 	   Pad between sections for proper alignment of int32_t and int64_t
 	   arrays. Worst-case padding is (alignment - 1) bytes per boundary. (#4) */
 	size_t ptr_bytes = 8 * n * sizeof(const char *);
-	size_t i32_bytes = 4 * n * sizeof(int32_t);
+	size_t i32_bytes = 9 * n * sizeof(int32_t); /* flag, as, xs, nm, ys, xn, xm, xo, xg */
 	size_t i64_bytes = 3 * n * sizeof(int64_t);
 	size_t u8_bytes  = n * sizeof(uint8_t);
 	size_t align_pad = (alignof(int32_t) - 1) + (alignof(int64_t) - 1);
@@ -422,6 +451,11 @@ bt2_align_output_t *AlnSinkColumnar::finalize() {
 	out->tag_as = (int32_t *)cursor; cursor += n * sizeof(int32_t);
 	out->tag_xs = (int32_t *)cursor; cursor += n * sizeof(int32_t);
 	out->tag_nm = (int32_t *)cursor; cursor += n * sizeof(int32_t);
+	out->tag_ys = (int32_t *)cursor; cursor += n * sizeof(int32_t);
+	out->tag_xn = (int32_t *)cursor; cursor += n * sizeof(int32_t);
+	out->tag_xm = (int32_t *)cursor; cursor += n * sizeof(int32_t);
+	out->tag_xo = (int32_t *)cursor; cursor += n * sizeof(int32_t);
+	out->tag_xg = (int32_t *)cursor; cursor += n * sizeof(int32_t);
 
 	/* int64_t arrays — align */
 	{
@@ -466,6 +500,11 @@ bt2_align_output_t *AlnSinkColumnar::finalize() {
 		out->tag_nm[i] = tb.tag_nm[r];
 		PACK_STR(out->tag_md, i, tb.tag_md[r]);
 		PACK_STR(out->tag_yt, i, tb.tag_yt[r]);
+		out->tag_ys[i] = tb.tag_ys[r];
+		out->tag_xn[i] = tb.tag_xn[r];
+		out->tag_xm[i] = tb.tag_xm[r];
+		out->tag_xo[i] = tb.tag_xo[r];
+		out->tag_xg[i] = tb.tag_xg[r];
 	}
 
 	#undef PACK_STR

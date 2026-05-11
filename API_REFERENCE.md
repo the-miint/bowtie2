@@ -7,7 +7,7 @@ pattern.
 
 **Header:** `bt2_api.h`
 **License:** GPL-3.0-or-later (same as bowtie2)
-**Version:** 0.2.0
+**Version:** 0.3.0
 
 ## Table of Contents
 
@@ -366,9 +366,24 @@ typedef struct {
     const char  **tag_md;       /* MD:Z mismatch string. */
     const char  **tag_yt;       /* YT:Z pairing classification. */
 
+    /* Optional SAM tags (v0.3) */
+    int32_t      *tag_ys;       /* YS:i mate alignment score.
+                                   INT32_MIN if not paired or no mate alignment. */
+    int32_t      *tag_xn;       /* XN:i ambiguous bases in covered ref. 0 if unaligned. */
+    int32_t      *tag_xm;       /* XM:i mismatches. 0 if unaligned. */
+    int32_t      *tag_xo;       /* XO:i gap opens. 0 if unaligned. */
+    int32_t      *tag_xg;       /* XG:i gap extensions (incl. opens). 0 if unaligned. */
+
     void         *_backing;     /* Internal. Do not access. */
 } bt2_align_output_t;
 ```
+
+The values in `tag_xm`, `tag_xo`, and `tag_xg` are computed with the same
+`count_mm_go_gx()` walk used by the SAM text sink (see `aligner_result.h`),
+so the columnar output is byte-for-byte equal to the SAM `XM:i`/`XO:i`/`XG:i`
+tags. The `tag_ys` sentinel `INT32_MIN` distinguishes "unpaired / no mate
+alignment" from a true score of zero; `tag_xn`/`tag_xm`/`tag_xo`/`tag_xg`
+all default to `0` for unaligned records, matching the `tag_nm` convention.
 
 The output uses a **Structure of Arrays (SOA)** layout for Arrow/columnar
 compatibility. All arrays have length `n_records`. String pointers reference
@@ -810,3 +825,30 @@ println!("cargo:rustc-link-lib=static=bowtie2-align-s-lib");
 println!("cargo:rustc-link-lib=stdc++");
 println!("cargo:rustc-link-lib=z");
 ```
+
+---
+
+## Changelog
+
+### 0.3.0
+
+- Append five optional SAM tag columns to `bt2_align_output_t`: `tag_ys`
+  (YS:i mate score), `tag_xn` (XN:i ambiguous ref bases), `tag_xm` (XM:i
+  mismatches), `tag_xo` (XO:i gap opens), `tag_xg` (XG:i gap extensions
+  incl. opens). All five are populated from the same edit-list walk the SAM
+  text sink uses, so columnar output is byte-equal to the SAM `XM`/`XO`/`XG`
+  tags. Sentinel: `INT32_MIN` for `tag_ys` when not in a paired alignment;
+  `0` for the others when the record is unaligned.
+- ABI: fields appended only — no reordering, no type changes. Existing
+  callers that read through `tag_yt` keep working unchanged.
+  `BT2_API_VERSION_MINOR` bumped 2 → 3.
+
+### 0.2.0
+
+- Expanded `bt2_align_config_t` with 31 typed alignment-option fields
+  (reporting, trimming, scoring, paired-end, strand, effort, output
+  toggles). Appended after the v0.1 fields for ABI compatibility.
+
+### 0.1.0
+
+- Initial release: reentrant aligner + index-builder C API.

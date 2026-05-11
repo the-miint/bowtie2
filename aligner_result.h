@@ -1567,6 +1567,64 @@ protected:
 };
 
 /**
+ * Walk an AlnRes's ned() edit list and count mismatches (XM), gap opens (XO),
+ * and gap extensions including opens (XG). Shared by the SAM text sink and
+ * the columnar C-API sink so both report identical values.
+ *
+ * Run-merge convention (why the two gap types use different conditions):
+ *   - A read gap is a stretch of reference bases inserted into the alignment
+ *     (gap in the read). All edits belonging to a single read-gap run carry
+ *     the SAME .pos (the read offset where the gap is anchored), with
+ *     successive inserted reference bases stored in .pos2. So the merge
+ *     condition is `ned[i+1].pos == ned[i].pos`.
+ *   - A ref gap is a deletion of reference bases (gap visible in the ref).
+ *     Each base removed advances the reference position by one, so successive
+ *     edits in a single ref-gap run have .pos values `p, p+1, p+2, ...`.
+ *     The merge condition is `ned[i+1].pos == ned[i].pos + 1`.
+ * Both rely on edits being stored in iteration order within a run, which
+ * is a guarantee of the alignment back-trace; do not reorder ned() entries.
+ *
+ * This logic was originally inlined at sam.cpp:185-212; do not let the two
+ * copies drift.
+ */
+inline void count_mm_go_gx(
+	const AlnRes& res,
+	size_t& num_mm,
+	size_t& num_go,
+	size_t& num_gx)
+{
+	num_mm = 0;
+	num_go = 0;
+	num_gx = 0;
+	const EList<Edit>& ned = res.ned();
+	for(size_t i = 0; i < ned.size(); i++) {
+		if(ned[i].isMismatch()) {
+			num_mm++;
+		} else if(ned[i].isReadGap()) {
+			num_go++;
+			num_gx++;
+			while(i < ned.size()-1 &&
+				  ned[i+1].pos == ned[i].pos &&
+				  ned[i+1].isReadGap())
+			{
+				i++;
+				num_gx++;
+			}
+		} else if(ned[i].isRefGap()) {
+			num_go++;
+			num_gx++;
+			while(i < ned.size()-1 &&
+				  ned[i+1].pos == ned[i].pos+1 &&
+				  ned[i+1].isRefGap())
+			{
+				i++;
+				num_gx++;
+			}
+		}
+	}
+}
+
+/**
  * Unique ID for a cell in the overall DP table.  This is a helpful concept
  * because of our definition of "redundnant".  Two alignments are redundant iff
  * they have at least one cell in common in the overall DP table.

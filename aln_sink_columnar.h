@@ -51,6 +51,12 @@ struct ColumnarThreadBuf {
 	std::vector<int32_t>     tag_nm;
 	std::vector<std::string> tag_md;
 	std::vector<std::string> tag_yt;
+	/* Optional tags (v0.3) */
+	std::vector<int32_t>     tag_ys;
+	std::vector<int32_t>     tag_xn;
+	std::vector<int32_t>     tag_xm;
+	std::vector<int32_t>     tag_xo;
+	std::vector<int32_t>     tag_xg;
 	/* Read IDs for ordering */
 	std::vector<uint64_t>    rdids;
 
@@ -60,7 +66,10 @@ struct ColumnarThreadBuf {
 		rnexts.clear(); pnexts.clear(); tlens.clear();
 		seqs.clear(); quals.clear();
 		tag_as.clear(); tag_xs.clear(); tag_nm.clear();
-		tag_md.clear(); tag_yt.clear(); rdids.clear();
+		tag_md.clear(); tag_yt.clear();
+		tag_ys.clear(); tag_xn.clear(); tag_xm.clear();
+		tag_xo.clear(); tag_xg.clear();
+		rdids.clear();
 	}
 
 	size_t size() const { return qnames.size(); }

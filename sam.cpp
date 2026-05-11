@@ -185,31 +185,7 @@ void SamConfig::printAlignedOptFlags(
 	size_t num_mm = 0;
 	size_t num_go = 0;
 	size_t num_gx = 0;
-	for(size_t i = 0; i < res.ned().size(); i++) {
-		if(res.ned()[i].isMismatch()) {
-			num_mm++;
-		} else if(res.ned()[i].isReadGap()) {
-			num_go++;
-			num_gx++;
-			while(i < res.ned().size()-1 &&
-				  res.ned()[i+1].pos == res.ned()[i].pos &&
-				  res.ned()[i+1].isReadGap())
-			{
-				i++;
-				num_gx++;
-			}
-		} else if(res.ned()[i].isRefGap()) {
-			num_go++;
-			num_gx++;
-			while(i < res.ned().size()-1 &&
-				  res.ned()[i+1].pos == res.ned()[i].pos+1 &&
-				  res.ned()[i+1].isRefGap())
-			{
-				i++;
-				num_gx++;
-			}
-		}
-	}
+	count_mm_go_gx(res, num_mm, num_go, num_gx);
 	if(print_xm_) {
 		// XM:i: Number of mismatches in the alignment
 		itoa10<size_t>(num_mm, buf);

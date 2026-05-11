@@ -64,6 +64,16 @@ def parse_sam(text):
                 rec["MD"] = f[5:]
             elif f.startswith("YT:Z:"):
                 rec["YT"] = f[5:]
+            elif f.startswith("YS:i:"):
+                rec["YS"] = int(f[5:])
+            elif f.startswith("XN:i:"):
+                rec["XN"] = int(f[5:])
+            elif f.startswith("XM:i:"):
+                rec["XM"] = int(f[5:])
+            elif f.startswith("XO:i:"):
+                rec["XO"] = int(f[5:])
+            elif f.startswith("XG:i:"):
+                rec["XG"] = int(f[5:])
         records.append(rec)
     return records
 
@@ -75,7 +85,7 @@ def parse_api_dump(text):
         if not line:
             continue
         fields = line.split("\t")
-        if len(fields) < 15:
+        if len(fields) < 20:
             continue
         rec = {
             "QNAME": fields[0],
@@ -93,6 +103,11 @@ def parse_api_dump(text):
             "NM": int(fields[12]),
             "MD": fields[13] if fields[13] else None,
             "YT": fields[14] if fields[14] else None,
+            "YS": int(fields[15]),
+            "XN": int(fields[16]),
+            "XM": int(fields[17]),
+            "XO": int(fields[18]),
+            "XG": int(fields[19]),
         }
         records.append(rec)
     return records
@@ -136,9 +151,10 @@ def compare_records(native, api, label):
     # while native SAM may output "*" when --omit-sec-seq is set.
     # Compare SEQ/QUAL only when native has actual data (not "*").
     seq_fields = ["SEQ", "QUAL"]
-    tag_fields = ["AS", "NM", "MD", "YT"]
+    tag_fields = ["AS", "NM", "MD", "YT", "YS", "XN", "XM", "XO", "XG"]
 
     XS_ABSENT = -2147483648  # INT32_MIN sentinel for absent XS tag
+    YS_ABSENT = -2147483648  # INT32_MIN sentinel for absent YS tag
 
     for i in range(len(native)):
         for field in fields_to_compare:
@@ -161,6 +177,10 @@ def compare_records(native, api, label):
                 continue
             # XS: API uses INT32_MIN sentinel for absent; skip if sentinel
             if field == "XS" and aval == XS_ABSENT:
+                continue
+            # YS: API uses INT32_MIN for unpaired / no mate alignment;
+            # native omits YS:i in those cases (parser leaves nval=None)
+            if field == "YS" and aval == YS_ABSENT:
                 continue
             if nval != aval:
                 print(f"FAIL [{label}] record {i} tag {field}: "

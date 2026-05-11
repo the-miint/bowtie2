@@ -133,7 +133,7 @@ extern "C" {
  * -------------------------------------------------------------------- */
 
 #define BT2_API_VERSION_MAJOR 0
-#define BT2_API_VERSION_MINOR 2
+#define BT2_API_VERSION_MINOR 3
 #define BT2_API_VERSION_PATCH 0
 
 /* --------------------------------------------------------------------
@@ -298,6 +298,14 @@ typedef struct {
     int32_t      *tag_nm;     /**< NM:i edit distance. NULL if absent. */
     const char  **tag_md;     /**< MD:Z mismatch string. NULL if absent. */
     const char  **tag_yt;     /**< YT:Z pairing type. NULL if absent. */
+
+    /* ---- v0.3 fields (appended for ABI compatibility) ---- */
+    int32_t      *tag_ys;     /**< YS:i mate alignment score.
+                                   INT32_MIN if not paired or no mate alignment. */
+    int32_t      *tag_xn;     /**< XN:i ambiguous bases in covered ref. 0 if unaligned. */
+    int32_t      *tag_xm;     /**< XM:i mismatches. 0 if unaligned. */
+    int32_t      *tag_xo;     /**< XO:i gap opens. 0 if unaligned. */
+    int32_t      *tag_xg;     /**< XG:i gap extensions (incl. opens). 0 if unaligned. */
 
     /* Internal — do not access directly */
     void         *_backing;   /**< Single allocation backing all arrays. */
@@ -497,5 +505,38 @@ const char *bt2_build_last_error(const bt2_build_ctx_t *ctx);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+/* --------------------------------------------------------------------
+ * ABI regression canaries
+ *
+ * Pin the ordering of v0.3 optional-tag fields in bt2_align_output_t. If a
+ * future change reorders or removes any of these, compilation breaks here
+ * before any binary callers can drift. This is a structural check (relative
+ * offsets), not a value check, so it tolerates compiler-specific padding.
+ * -------------------------------------------------------------------- */
+
+#if defined(__cplusplus)
+#  define BT2_API_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  define BT2_API_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#else
+#  define BT2_API_STATIC_ASSERT(cond, msg) /* pre-C11: skip */
+#endif
+
+BT2_API_STATIC_ASSERT(
+    offsetof(bt2_align_output_t, tag_ys) > offsetof(bt2_align_output_t, tag_yt),
+    "ABI: bt2_align_output_t.tag_ys must be appended after tag_yt");
+BT2_API_STATIC_ASSERT(
+    offsetof(bt2_align_output_t, tag_xn) > offsetof(bt2_align_output_t, tag_ys),
+    "ABI: bt2_align_output_t.tag_xn must follow tag_ys");
+BT2_API_STATIC_ASSERT(
+    offsetof(bt2_align_output_t, tag_xm) > offsetof(bt2_align_output_t, tag_xn),
+    "ABI: bt2_align_output_t.tag_xm must follow tag_xn");
+BT2_API_STATIC_ASSERT(
+    offsetof(bt2_align_output_t, tag_xo) > offsetof(bt2_align_output_t, tag_xm),
+    "ABI: bt2_align_output_t.tag_xo must follow tag_xm");
+BT2_API_STATIC_ASSERT(
+    offsetof(bt2_align_output_t, tag_xg) > offsetof(bt2_align_output_t, tag_xo),
+    "ABI: bt2_align_output_t.tag_xg must follow tag_xo");
 
 #endif /* BT2_API_H */

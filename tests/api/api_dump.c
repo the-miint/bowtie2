@@ -16,7 +16,8 @@
  *   --ignore-quals  --reorder  --local  --seed N
  *
  * Output: one TSV line per record:
- *   QNAME\tFLAG\tRNAME\tPOS\tMAPQ\tCIGAR\tRNEXT\tPNEXT\tTLEN\tSEQ\tQUAL\tAS\tNM\tMD\tYT
+ *   QNAME\tFLAG\tRNAME\tPOS\tMAPQ\tCIGAR\tRNEXT\tPNEXT\tTLEN\tSEQ\tQUAL\t
+ *   AS\tNM\tMD\tYT\tYS\tXN\tXM\tXO\tXG
  */
 #include "bt2_api.h"
 #include <stdio.h>
@@ -162,6 +163,12 @@ int main(int argc, char **argv) {
         printf("\t%d", output->tag_nm[i]);
         printf("\t%s", output->tag_md[i] ? output->tag_md[i] : "");
         printf("\t%s", output->tag_yt[i] ? output->tag_yt[i] : "");
+        /* v0.3 tags */
+        printf("\t%d", output->tag_ys[i]);
+        printf("\t%d", output->tag_xn[i]);
+        printf("\t%d", output->tag_xm[i]);
+        printf("\t%d", output->tag_xo[i]);
+        printf("\t%d", output->tag_xg[i]);
         printf("\n");
     }
 

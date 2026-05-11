@@ -37,6 +37,9 @@ add_api_test(test_input_paired_memory)
 add_api_test(test_input_empty)
 add_api_test(test_input_no_qual)
 
+# v0.3 optional-tag fields (YS/XN/XM/XO/XG)
+add_api_test(test_align_tag_fields)
+
 # api_dump_memory helper (used by Python memory-vs-file comparison tests)
 add_executable(api_dump_memory api_dump_memory.c)
 target_link_libraries(api_dump_memory bowtie2-align-s-lib)
