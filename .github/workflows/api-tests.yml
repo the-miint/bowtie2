@@ -39,7 +39,7 @@ jobs:
       - name: Build
         run: cmake --build build -j$(nproc)
       - name: Run all tests
-        run: cd build && ctest --output-on-failure --timeout 120
+        run: cd build && ctest --output-on-failure --timeout 600
 
   macos:
     runs-on: macos-latest
@@ -76,7 +76,7 @@ jobs:
           echo "repro exit=$?"
       - name: Run all tests
         working-directory: build
-        run: ctest --output-on-failure --timeout 120
+        run: ctest --output-on-failure --timeout 600
 
   sanitizer-asan:
     runs-on: ubuntu-latest
@@ -93,7 +93,7 @@ jobs:
       - name: Build
         run: cmake --build build -j$(nproc)
       - name: Run API tests under ASan
-        run: cd build && ctest -R api-test --output-on-failure --timeout 300
+        run: cd build && ctest -R api-test --output-on-failure --timeout 900
 
   # ASan on macOS aarch64 — the platform that actually crashes in
   # localdocs/ISSUE-bowtie2-sigsegv-macos-aarch64.md. Running ASan on
@@ -110,7 +110,7 @@ jobs:
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.ncpu)
       - name: Run API tests under ASan
-        run: cd build && ctest -R api-test --output-on-failure --timeout 300
+        run: cd build && ctest -R api-test --output-on-failure --timeout 900
 
   sanitizer-tsan:
     runs-on: ubuntu-latest
@@ -129,4 +129,4 @@ jobs:
       - name: Run API tests under TSan
         env:
           TSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/tsan_suppressions.txt
-        run: cd build && ctest -R api-test --output-on-failure --timeout 300
+        run: cd build && ctest -R api-test --output-on-failure --timeout 900

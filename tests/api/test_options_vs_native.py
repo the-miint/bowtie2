@@ -10,6 +10,7 @@ record-by-record.
 import subprocess
 import sys
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
@@ -181,165 +182,166 @@ def compare_records(native, api, label):
     print(f"PASS [{label}]: {len(native)} records match")
 
 
-def main():
+RUNNERS = {
+    "native": run_native,
+    "api": run_api,
+    "api_mem": run_api_memory,
+}
+
+
+def native(reads, reads2=None, flags=None):
+    return ("native", reads, reads2, flags)
+
+
+def api(reads, reads2=None, flags=None):
+    return ("api", reads, reads2, flags)
+
+
+def api_mem(reads, reads2=None, flags=None):
+    return ("api_mem", reads, reads2, flags)
+
+
+def _execute_side(side):
+    kind, reads, reads2, flags = side
+    return RUNNERS[kind](INDEX, reads, reads2, flags)
+
+
+# Each case is (section, label, left_side, right_side).
+# Cases run in parallel via ThreadPoolExecutor; output is reordered into
+# this declared order so PASS lines and banners stay deterministic.
+CASES = [
     # --- Cycle 2: Reporting ---
-    print("=== Reporting ===")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["-k", "3"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--k", "3"])
-    compare_records(native, api, "k=3 single-end")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["-a"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--report-all"])
-    compare_records(native, api, "-a single-end")
+    ("Reporting", "k=3 single-end",
+        native(READS_SE, flags=["-k", "3"]),
+        api(READS_SE, flags=["--k", "3"])),
+    ("Reporting", "-a single-end",
+        native(READS_SE, flags=["-a"]),
+        api(READS_SE, flags=["--report-all"])),
 
     # --- Cycle 3: Trimming ---
-    print("=== Trimming ===")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--trim5", "10"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--trim5", "10"])
-    compare_records(native, api, "trim5=10")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--trim3", "10"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--trim3", "10"])
-    compare_records(native, api, "trim3=10")
+    ("Trimming", "trim5=10",
+        native(READS_SE, flags=["--trim5", "10"]),
+        api(READS_SE, flags=["--trim5", "10"])),
+    ("Trimming", "trim3=10",
+        native(READS_SE, flags=["--trim3", "10"]),
+        api(READS_SE, flags=["--trim3", "10"])),
 
     # --- Cycle 4: Scoring ---
-    print("=== Scoring ===")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--local", "--ma", "10"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--local", "--ma", "10"])
-    compare_records(native, api, "local ma=10")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--mp", "3"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--mp", "3"])
-    compare_records(native, api, "mp=3")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--np", "5"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--np", "5"])
-    compare_records(native, api, "np=5")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--rdg", "3,1", "--rfg", "3,1"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--rdg-open", "3", "--rdg-extend", "1",
-                                                 "--rfg-open", "3", "--rfg-extend", "1"])
-    compare_records(native, api, "rdg=3,1 rfg=3,1")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--score-min", "L,-1,-1"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--score-min", "L,-1,-1"])
-    compare_records(native, api, "score-min=L,-1,-1")
+    ("Scoring", "local ma=10",
+        native(READS_SE, flags=["--local", "--ma", "10"]),
+        api(READS_SE, flags=["--local", "--ma", "10"])),
+    ("Scoring", "mp=3",
+        native(READS_SE, flags=["--mp", "3"]),
+        api(READS_SE, flags=["--mp", "3"])),
+    ("Scoring", "np=5",
+        native(READS_SE, flags=["--np", "5"]),
+        api(READS_SE, flags=["--np", "5"])),
+    ("Scoring", "rdg=3,1 rfg=3,1",
+        native(READS_SE, flags=["--rdg", "3,1", "--rfg", "3,1"]),
+        api(READS_SE, flags=["--rdg-open", "3", "--rdg-extend", "1",
+                             "--rfg-open", "3", "--rfg-extend", "1"])),
+    ("Scoring", "score-min=L,-1,-1",
+        native(READS_SE, flags=["--score-min", "L,-1,-1"]),
+        api(READS_SE, flags=["--score-min", "L,-1,-1"])),
 
     # --- Cycle 5: Paired-end ---
-    print("=== Paired-end ===")
-
-    native = run_native(INDEX, READS_1, READS_2, extra_flags=["-X", "100"])
-    api = run_api(INDEX, READS_1, READS_2, extra_flags=["--max-insert", "100"])
-    compare_records(native, api, "maxins=100 paired")
-
-    native = run_native(INDEX, READS_1, READS_2, extra_flags=["-I", "50"])
-    api = run_api(INDEX, READS_1, READS_2, extra_flags=["--min-insert", "50"])
-    compare_records(native, api, "minins=50 paired")
-
-    native = run_native(INDEX, READS_1, READS_2, extra_flags=["--no-discordant"])
-    api = run_api(INDEX, READS_1, READS_2, extra_flags=["--no-discordant"])
-    compare_records(native, api, "no-discordant paired")
-
-    native = run_native(INDEX, READS_1, READS_2, extra_flags=["--rf"])
-    api = run_api(INDEX, READS_1, READS_2, extra_flags=["--mate-orient", "RF"])
-    compare_records(native, api, "rf paired")
-
-    native = run_native(INDEX, READS_1, READS_2, extra_flags=["--dovetail"])
-    api = run_api(INDEX, READS_1, READS_2, extra_flags=["--dovetail"])
-    compare_records(native, api, "dovetail paired")
-
-    native = run_native(INDEX, READS_1, READS_2, extra_flags=["--no-mixed"])
-    api = run_api(INDEX, READS_1, READS_2, extra_flags=["--no-mixed"])
-    compare_records(native, api, "no-mixed paired")
+    ("Paired-end", "maxins=100 paired",
+        native(READS_1, READS_2, flags=["-X", "100"]),
+        api(READS_1, READS_2, flags=["--max-insert", "100"])),
+    ("Paired-end", "minins=50 paired",
+        native(READS_1, READS_2, flags=["-I", "50"]),
+        api(READS_1, READS_2, flags=["--min-insert", "50"])),
+    ("Paired-end", "no-discordant paired",
+        native(READS_1, READS_2, flags=["--no-discordant"]),
+        api(READS_1, READS_2, flags=["--no-discordant"])),
+    ("Paired-end", "rf paired",
+        native(READS_1, READS_2, flags=["--rf"]),
+        api(READS_1, READS_2, flags=["--mate-orient", "RF"])),
+    ("Paired-end", "dovetail paired",
+        native(READS_1, READS_2, flags=["--dovetail"]),
+        api(READS_1, READS_2, flags=["--dovetail"])),
+    ("Paired-end", "no-mixed paired",
+        native(READS_1, READS_2, flags=["--no-mixed"]),
+        api(READS_1, READS_2, flags=["--no-mixed"])),
 
     # --- Cycle 6: Strand ---
-    print("=== Strand ===")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--norc"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--norc"])
-    compare_records(native, api, "norc")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--nofw"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--nofw"])
-    compare_records(native, api, "nofw")
+    ("Strand", "norc",
+        native(READS_SE, flags=["--norc"]),
+        api(READS_SE, flags=["--norc"])),
+    ("Strand", "nofw",
+        native(READS_SE, flags=["--nofw"]),
+        api(READS_SE, flags=["--nofw"])),
 
     # --- Cycle 7: Effort ---
-    print("=== Effort ===")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["-N", "1"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--seed-mm", "1"])
-    compare_records(native, api, "N=1")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["-L", "28"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--seed-len", "28"])
-    compare_records(native, api, "L=28")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["-D", "5", "-R", "1"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--max-dp-fail", "5", "--max-seed-rounds", "1"])
-    compare_records(native, api, "D=5 R=1")
+    ("Effort", "N=1",
+        native(READS_SE, flags=["-N", "1"]),
+        api(READS_SE, flags=["--seed-mm", "1"])),
+    ("Effort", "L=28",
+        native(READS_SE, flags=["-L", "28"]),
+        api(READS_SE, flags=["--seed-len", "28"])),
+    ("Effort", "D=5 R=1",
+        native(READS_SE, flags=["-D", "5", "-R", "1"]),
+        api(READS_SE, flags=["--max-dp-fail", "5", "--max-seed-rounds", "1"])),
 
     # --- Cycle 8: SAM output ---
-    print("=== SAM output ===")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--no-unal"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--no-unal"])
-    compare_records(native, api, "no-unal")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--xeq"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--xeq"])
-    compare_records(native, api, "xeq")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--rg-id", "sample42"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--rg-id", "sample42"])
-    compare_records(native, api, "rg-id=sample42")
+    ("SAM output", "no-unal",
+        native(READS_SE, flags=["--no-unal"]),
+        api(READS_SE, flags=["--no-unal"])),
+    ("SAM output", "xeq",
+        native(READS_SE, flags=["--xeq"]),
+        api(READS_SE, flags=["--xeq"])),
+    ("SAM output", "rg-id=sample42",
+        native(READS_SE, flags=["--rg-id", "sample42"]),
+        api(READS_SE, flags=["--rg-id", "sample42"])),
 
     # --- Cycle 9: Other ---
-    print("=== Other ===")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--ignore-quals"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--ignore-quals"])
-    compare_records(native, api, "ignore-quals")
-
-    native = run_native(INDEX, READS_SE, extra_flags=["--reorder"])
-    api = run_api(INDEX, READS_SE, extra_flags=["--reorder"])
-    compare_records(native, api, "reorder")
+    ("Other", "ignore-quals",
+        native(READS_SE, flags=["--ignore-quals"]),
+        api(READS_SE, flags=["--ignore-quals"])),
+    ("Other", "reorder",
+        native(READS_SE, flags=["--reorder"]),
+        api(READS_SE, flags=["--reorder"])),
 
     # --- Cycle 10: Combos ---
-    print("=== Combos ===")
+    ("Combos", "combo: local+scoring+k+trim",
+        native(READS_SE, flags=["--local", "--ma", "4", "--mp", "3", "-k", "3", "--trim5", "5"]),
+        api(READS_SE, flags=["--local", "--ma", "4", "--mp", "3", "--k", "3", "--trim5", "5"])),
+    ("Combos", "combo: paired strict constraints",
+        native(READS_1, READS_2, flags=["-X", "200", "--no-discordant", "--no-mixed", "-N", "1"]),
+        api(READS_1, READS_2, flags=["--max-insert", "200", "--no-discordant", "--no-mixed", "--seed-mm", "1"])),
 
-    flags_n = ["--local", "--ma", "4", "--mp", "3", "-k", "3", "--trim5", "5"]
-    flags_a = ["--local", "--ma", "4", "--mp", "3", "--k", "3", "--trim5", "5"]
-    native = run_native(INDEX, READS_SE, extra_flags=flags_n)
-    api = run_api(INDEX, READS_SE, extra_flags=flags_a)
-    compare_records(native, api, "combo: local+scoring+k+trim")
+    # --- Cycle 11: Memory path parity (api file vs api memory) ---
+    ("Memory path", "memory vs file: local+ma+trim+k",
+        api(READS_SE, flags=["--local", "--ma", "4", "--trim5", "5", "--k", "3"]),
+        api_mem(READS_SE, flags=["--local", "--ma", "4", "--trim5", "5", "--k", "3"])),
+    ("Memory path", "memory vs file: norc+ignore-quals",
+        api(READS_SE, flags=["--norc", "--ignore-quals"]),
+        api_mem(READS_SE, flags=["--norc", "--ignore-quals"])),
+    ("Memory path", "memory vs file: xeq+N=1",
+        api(READS_SE, flags=["--xeq", "--seed-mm", "1"]),
+        api_mem(READS_SE, flags=["--xeq", "--seed-mm", "1"])),
+]
 
-    flags_n = ["-X", "200", "--no-discordant", "--no-mixed", "-N", "1"]
-    flags_a = ["--max-insert", "200", "--no-discordant", "--no-mixed", "--seed-mm", "1"]
-    native = run_native(INDEX, READS_1, READS_2, extra_flags=flags_n)
-    api = run_api(INDEX, READS_1, READS_2, extra_flags=flags_a)
-    compare_records(native, api, "combo: paired strict constraints")
 
-    # --- Cycle 11: Memory path parity ---
-    print("=== Memory path ===")
+def main():
+    # Cap workers to keep memory pressure manageable under ASan/TSan, where
+    # each bowtie2 process can use several hundred MB. 4 saturates the 2-4
+    # core GitHub runners without OOMing on sanitizer jobs.
+    workers = min(4, (os.cpu_count() or 2))
 
-    # Memory path should produce identical output to file path with same options
-    flags = ["--local", "--ma", "4", "--trim5", "5", "--k", "3"]
-    file_out = run_api(INDEX, READS_SE, extra_flags=flags)
-    mem_out = run_api_memory(INDEX, READS_SE, extra_flags=flags)
-    compare_records(file_out, mem_out, "memory vs file: local+ma+trim+k")
+    def execute_case(idx_case):
+        idx, (section, label, left, right) = idx_case
+        return idx, section, label, _execute_side(left), _execute_side(right)
 
-    flags = ["--norc", "--ignore-quals"]
-    file_out = run_api(INDEX, READS_SE, extra_flags=flags)
-    mem_out = run_api_memory(INDEX, READS_SE, extra_flags=flags)
-    compare_records(file_out, mem_out, "memory vs file: norc+ignore-quals")
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        results = list(ex.map(execute_case, enumerate(CASES)))
 
-    flags = ["--xeq", "--seed-mm", "1"]
-    file_out = run_api(INDEX, READS_SE, extra_flags=flags)
-    mem_out = run_api_memory(INDEX, READS_SE, extra_flags=flags)
-    compare_records(file_out, mem_out, "memory vs file: xeq+N=1")
+    current_section = None
+    for _, section, label, left, right in results:
+        if section != current_section:
+            print(f"=== {section} ===")
+            current_section = section
+        compare_records(left, right, label)
 
     print("\ntest_options_vs_native: ALL PASSED")
 

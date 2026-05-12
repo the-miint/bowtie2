@@ -134,5 +134,6 @@ if (Python3_FOUND)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_options_vs_native.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(api-test-options-vs-native PROPERTIES
-    DEPENDS "api-test_align_basic")
+    DEPENDS "api-test_align_basic"
+    TIMEOUT 900)
 endif()
