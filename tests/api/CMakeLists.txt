@@ -135,5 +135,5 @@ if (Python3_FOUND)
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(api-test-options-vs-native PROPERTIES
     DEPENDS "api-test_align_basic"
-    TIMEOUT 900)
+    TIMEOUT 1800)
 endif()

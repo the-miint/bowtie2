@@ -327,7 +327,10 @@ def main():
     # Cap workers to keep memory pressure manageable under ASan/TSan, where
     # each bowtie2 process can use several hundred MB. 4 saturates the 2-4
     # core GitHub runners without OOMing on sanitizer jobs.
-    workers = min(4, (os.cpu_count() or 2))
+    # TSan needs an extra ceiling: shadow memory is ~8x heap, so 4 parallel
+    # instrumented processes thrash the 4 GiB runner. Drop to 2 there.
+    cpu_cap = min(4, (os.cpu_count() or 2))
+    workers = 2 if "TSAN_OPTIONS" in os.environ else cpu_cap
 
     def execute_case(idx_case):
         idx, (section, label, left, right) = idx_case

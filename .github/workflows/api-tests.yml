@@ -129,4 +129,4 @@ jobs:
       - name: Run API tests under TSan
         env:
           TSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/tsan_suppressions.txt
-        run: cd build && ctest -R api-test --output-on-failure --timeout 900
+        run: cd build && ctest -R api-test --output-on-failure --timeout 1800
