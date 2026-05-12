@@ -323,6 +323,14 @@ CASES = [
 ]
 
 
+SUBSET_LABELS = frozenset({
+    "-a single-end",
+    "local ma=10",
+    "maxins=100 paired",
+    "memory vs file: xeq+N=1",
+})
+
+
 def main():
     # Cap workers to keep memory pressure manageable under ASan/TSan, where
     # each bowtie2 process can use several hundred MB. 4 saturates the 2-4
@@ -332,12 +340,25 @@ def main():
     cpu_cap = min(4, (os.cpu_count() or 2))
     workers = 2 if "TSAN_OPTIONS" in os.environ else cpu_cap
 
+    # BT2_FAST_SUBSET runs a 4-case smoke set covering reporting, scoring,
+    # paired-end, and memory-path translation. Used by the TSan CI job
+    # where the full 30-case sweep is prohibitively slow and the threading
+    # surface exercised here is already covered by test_align_basic/paired.
+    if os.environ.get("BT2_FAST_SUBSET"):
+        cases = [c for c in CASES if c[1] in SUBSET_LABELS]
+        missing = SUBSET_LABELS - {c[1] for c in cases}
+        if missing:
+            print(f"BT2_FAST_SUBSET: missing labels {sorted(missing)}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        cases = CASES
+
     def execute_case(idx_case):
         idx, (section, label, left, right) = idx_case
         return idx, section, label, _execute_side(left), _execute_side(right)
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        results = list(ex.map(execute_case, enumerate(CASES)))
+        results = list(ex.map(execute_case, enumerate(cases)))
 
     current_section = None
     for _, section, label, left, right in results:
