@@ -262,6 +262,13 @@ typedef struct {
     /* Other */
     int          ignore_quals;      /**< Treat all quals as 30 (--ignore-quals). Default: 0. */
     int          reorder;           /**< Preserve input order in output (--reorder). Default: 0. */
+
+    /* ---- v0.3 fields (appended for ABI compatibility) ---- */
+
+    /* Scoring (cont.) — sentinel -1 means "use bowtie2 mode-dependent default" */
+    int          mismatch_penalty_min; /**< Min mismatch penalty (--mp arg2, the MIN of MAX,MIN).
+                                            Pairs with mismatch_penalty (--mp arg1 = MAX).
+                                            Default: -1. Setting both enables e.g. --mp 1,1. */
 } bt2_align_config_t;
 
 /* --------------------------------------------------------------------

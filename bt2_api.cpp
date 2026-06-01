@@ -123,6 +123,7 @@ void bt2_align_config_init(bt2_align_config_t *config) {
 	/* v0.2 fields — booleans/trim/k/strings already 0/NULL from memset */
 	config->match_bonus       = -1;
 	config->mismatch_penalty  = -1;
+	config->mismatch_penalty_min = -1;   /* v0.3 — appended field */
 	config->n_penalty         = -1;
 	config->read_gap_open     = -1;
 	config->read_gap_extend   = -1;
@@ -454,8 +455,29 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 		   When log_fn is NULL, respect the quiet setting. */
 		int effective_quiet = (ctx->config.log_fn != NULL) ? 0 : ctx->config.quiet;
 
-		/* Set statics from API config */
-		apply_config_to_statics(&ctx->config, effective_quiet);
+		/* Set statics from API config.
+		   apply_config_to_statics() invokes parseOptions(), the real bowtie2
+		   option parser, which reports invalid scoring/seed policies by
+		   throwing — a Bt2ApiException for already-converted sites and a bare
+		   int (legacy `throw 1`) for the rest. This runs OUTSIDE the driver
+		   try/catch below, so it must be guarded here: any parser throw has to
+		   become a clean error return, never escape the extern "C" boundary
+		   and abort the host process. No patsrc/g_api_* state is live yet, so
+		   unwinding the lock/cerr guards on return is sufficient cleanup. */
+		try {
+			apply_config_to_statics(&ctx->config, effective_quiet);
+		} catch (const Bt2ApiException& e) {
+			set_last_error(ctx, e.what());
+			return e.error_code;
+		} catch (const std::exception& e) {
+			set_last_error(ctx, e.what());
+			return BT2_ERR_INVALID_CONFIG;
+		} catch (int code) {
+			(void)code;
+			set_last_error(ctx, "Invalid bowtie2 option or scoring/seed policy "
+			                    "(see log output for the parser's message)");
+			return BT2_ERR_INVALID_CONFIG;
+		}
 
 		/* Build PatternParams for MemoryPatternSource */
 		PatternParams pp(

@@ -63,6 +63,7 @@ int main(void) {
     /* Scoring — sentinel -1 means "use bowtie2 default" */
     assert(config.match_bonus == -1);
     assert(config.mismatch_penalty == -1);
+    assert(config.mismatch_penalty_min == -1);  /* v0.3 appended field */
     assert(config.n_penalty == -1);
     assert(config.read_gap_open == -1);
     assert(config.read_gap_extend == -1);

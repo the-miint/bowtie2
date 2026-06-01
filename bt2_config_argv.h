@@ -64,8 +64,15 @@ inline void append_config_argv(const bt2_align_config_t *config,
 		argv.push_back("--ma");
 		argv.push_back(bufs->ma);
 	}
-	if (config->mismatch_penalty >= 0) {
-		snprintf(bufs->mp, sizeof(bufs->mp), "%d", config->mismatch_penalty);
+	if (config->mismatch_penalty >= 0 || config->mismatch_penalty_min >= 0) {
+		/* --mp takes MAX,MIN. Default the unset side to bowtie2's compiled-in
+		   value so emitting a pair with only the max set (MX,2) matches
+		   native single-value `--mp MX` behavior. If MX < MIN the parser
+		   rejects it — same as native bowtie2 — now surfaced as a clean
+		   error return rather than a process abort. */
+		int mx = config->mismatch_penalty     >= 0 ? config->mismatch_penalty     : DEFAULT_MM_PENALTY_MAX;
+		int mn = config->mismatch_penalty_min >= 0 ? config->mismatch_penalty_min : DEFAULT_MM_PENALTY_MIN;
+		snprintf(bufs->mp, sizeof(bufs->mp), "%d,%d", mx, mn);
 		argv.push_back("--mp");
 		argv.push_back(bufs->mp);
 	}

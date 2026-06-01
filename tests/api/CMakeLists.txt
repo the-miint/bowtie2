@@ -54,6 +54,7 @@ add_api_test(test_direct_no_tempfile)
 add_api_test(test_error_no_exit)
 add_api_test(test_error_recovery)
 add_api_test(test_log_callback)
+add_api_test(test_error_invalid_mp)
 
 # Phase 6 tests — index builder API (link against build library)
 macro(add_build_api_test name)

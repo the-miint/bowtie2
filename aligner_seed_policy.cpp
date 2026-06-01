@@ -24,6 +24,10 @@
 #include "ds.h"
 #include "aligner_seed_policy.h"
 #include "mem_ids.h"
+#ifdef BT2_NO_MAIN
+#include "bt2_api.h"
+#include "bt2_api_exception.h"
+#endif
 
 using namespace std;
 
@@ -403,9 +407,14 @@ void SeedAlignmentPolicy::parseString(
 				}
 				if(penMmcMin > penMmcMax) {
 					cerr << "Error: Maximum mismatch penalty (" << penMmcMax
-					     << ") is less than minimum penalty (" << penMmcMin
+					     << ") is less than minimum penalty (" << penMmcMin << ")"
 						 << endl;
+#ifdef BT2_NO_MAIN
+					throw Bt2ApiException(BT2_ERR_INVALID_CONFIG,
+						"--mp maximum mismatch penalty is less than the minimum penalty");
+#else
 					throw 1;
+#endif
 				}
 				// Set type to =quality
 				penMmcType = COST_MODEL_QUAL;
