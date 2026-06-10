@@ -76,6 +76,12 @@ void Ebwt::readIntoMemory(
 
 #ifdef BOWTIE_MM
 		if(_useMm /*&& !justHeader*/) {
+			// readIntoMemory() is entered more than once per Ebwt (header read
+			// at construction, then the full load), and each pass re-mmaps the
+			// files below. Release any mapping from a prior pass first so the
+			// earlier VMA isn't leaked when mmFile1_/mmFile2_ are overwritten.
+			if(mmFile1_ != NULL) { munmap((void*)mmFile1_, mmFile1Sz_); mmFile1_ = NULL; mmFile1Sz_ = 0; }
+			if(mmFile2_ != NULL) { munmap((void*)mmFile2_, mmFile2Sz_); mmFile2_ = NULL; mmFile2Sz_ = 0; }
 			const char *names[] = {_in1Str.c_str(), _in2Str.c_str()};
 			int fds[] = { fileno(_in1), fileno(_in2) };
 			for(int i = 0; i < (loadSASamp ? 2 : 1); i++) {
@@ -96,6 +102,9 @@ void Ebwt::readIntoMemory(
 					cerr << "Error: Could not memory-map the index file " << names[i] << endl;
 					throw 1;
 				}
+				// Remember the mapped length so ~Ebwt() can munmap it.
+				if(i == 0) mmFile1Sz_ = (size_t)sbuf.st_size;
+				else       mmFile2Sz_ = (size_t)sbuf.st_size;
 				if(mmSweep) {
 					int sum = 0;
 					for(off_t j = 0; j < sbuf.st_size; j += 1024) {

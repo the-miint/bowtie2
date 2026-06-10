@@ -568,7 +568,9 @@ public:
 		useShmem_(false),			\
 		_refnames(EBWT_CAT),			\
 		mmFile1_(NULL),				\
-		mmFile2_(NULL)
+		mmFile2_(NULL),				\
+		mmFile1Sz_(0),				\
+		mmFile2Sz_(0)
 
 	/// Construct an Ebwt from the given input file
 	Ebwt(const string& in,
@@ -1234,6 +1236,21 @@ public:
 		if(ebwt() != NULL && useShmem_) {
 			FREE_SHARED(ebwt());
 		}
+#ifdef BOWTIE_MM
+		// The --mm path maps the index files but historically never
+		// unmapped them. Harmless for the one-shot CLI (process exit
+		// reclaims the VMAs), but a per-call leak when the C API invokes
+		// driver() once per batch in a long-lived worker. Release here so
+		// the mapping's lifetime matches the Ebwt object's.
+		if(_useMm && mmFile1_ != NULL) {
+			munmap((void *)mmFile1_, mmFile1Sz_);
+			mmFile1_ = NULL;
+		}
+		if(_useMm && mmFile2_ != NULL) {
+			munmap((void *)mmFile2_, mmFile2Sz_);
+			mmFile2_ = NULL;
+		}
+#endif
 		if (_in1 != NULL) fclose(_in1);
 		if (_in2 != NULL) fclose(_in2);
 	}
@@ -2544,6 +2561,8 @@ public:
 	EList<string> _refnames; /// names of the reference sequences
 	char *mmFile1_;
 	char *mmFile2_;
+	size_t mmFile1Sz_;  /// mmap length of mmFile1_ when _useMm (for munmap)
+	size_t mmFile2Sz_;  /// mmap length of mmFile2_ when _useMm (for munmap)
 	EbwtParams _eh;
 	bool packed_;
 

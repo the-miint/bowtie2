@@ -50,6 +50,10 @@ set_target_properties(api_dump_memory PROPERTIES
 # Phase 4 tests — direct driver path (no temp files)
 add_api_test(test_direct_no_tempfile)
 
+# v0.4 — verify the --mm (memory_mapped) path does not leak index mappings
+# across repeated runs on one context (munmap-on-teardown fix).
+add_api_test(test_mm_no_vma_leak)
+
 # Phase 5 tests — error handling and log callback
 add_api_test(test_error_no_exit)
 add_api_test(test_error_recovery)

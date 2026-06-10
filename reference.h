@@ -177,6 +177,7 @@ protected:
 	uint8_t *sanityBuf_;/// for sanity-checking buf_
 	TIndexOffU bufSz_;    /// size of buf_
 	TIndexOffU bufAllocSz_;
+	size_t   mmFileSz_;   /// mmap length of buf_ when useMm_ (for munmap)
 	TIndexOffU nrefs_;    /// the number of reference sequences
 	bool     loaded_;   /// whether it's loaded
 	bool     sanity_;   /// do sanity checking

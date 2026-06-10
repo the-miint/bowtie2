@@ -47,6 +47,7 @@ BitPairReference::BitPairReference(
 	useShmem_(useShmem),
 	verbose_(verbose)
 {
+	mmFileSz_ = 0;
 	string s3 = in + ".3." + gEbwt_ext;
 	string s4 = in + ".4." + gEbwt_ext;
 	
@@ -84,6 +85,7 @@ BitPairReference::BitPairReference(
 			cerr << "Error: Could not memory-map the index file " << s4.c_str() << endl;
 			throw 1;
 		}
+		mmFileSz_ = (size_t)sbuf.st_size; // remember length for munmap in ~BitPairReference
 		if(mmSweep) {
 			TIndexOff sum = 0;
 			for(off_t i = 0; i < sbuf.st_size; i += 1024) {
@@ -314,6 +316,12 @@ BitPairReference::BitPairReference(
 }
 
 BitPairReference::~BitPairReference() {
+#ifdef BOWTIE_MM
+	// Historically the --mm path mapped buf_ but never unmapped it: safe for
+	// the one-shot CLI (process exit reclaims the VMA) but a per-call leak
+	// when the C API reconstructs the reference once per batch. Release here.
+	if(buf_ != NULL && useMm_ && mmFileSz_ > 0) munmap((void *)buf_, mmFileSz_);
+#endif
 	if(buf_ != NULL && !useMm_ && !useShmem_) delete[] buf_;
 	if(sanityBuf_ != NULL) delete[] sanityBuf_;
 }
