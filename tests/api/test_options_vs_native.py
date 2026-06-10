@@ -320,6 +320,32 @@ CASES = [
     ("Memory path", "memory vs file: xeq+N=1",
         api(READS_SE, flags=["--xeq", "--seed-mm", "1"]),
         api_mem(READS_SE, flags=["--xeq", "--seed-mm", "1"])),
+
+    # --- Cycle 12: Seed quality / determinism (v0.4 options) ---
+    ("Seed quality", "lowseeds=100",
+        native(READS_SE, flags=["--lowseeds", "100"]),
+        api(READS_SE, flags=["--lowseeds", "100"])),
+    ("Seed quality", "lowseeds=5% (suffix passthrough)",
+        native(READS_SE, flags=["--lowseeds", "5%"]),
+        api(READS_SE, flags=["--lowseeds", "5%"])),
+    ("Seed quality", "no-exact-upfront",
+        native(READS_SE, flags=["--no-exact-upfront"]),
+        api(READS_SE, flags=["--no-exact-upfront"])),
+    ("Seed quality", "no-1mm-upfront",
+        native(READS_SE, flags=["--no-1mm-upfront"]),
+        api(READS_SE, flags=["--no-1mm-upfront"])),
+    # deterministic-seeds requires -a and both --no-*-upfront (parser-enforced).
+    ("Seed quality", "deterministic-seeds (-a + no-upfront)",
+        native(READS_SE, flags=["-a", "--no-exact-upfront", "--no-1mm-upfront", "--deterministic-seeds"]),
+        api(READS_SE, flags=["--report-all", "--no-exact-upfront", "--no-1mm-upfront", "--deterministic-seeds"])),
+
+    # --- Cycle 13: Memory path parity for v0.4 options ---
+    ("Memory path", "memory vs file: lowseeds=100",
+        api(READS_SE, flags=["--lowseeds", "100"]),
+        api_mem(READS_SE, flags=["--lowseeds", "100"])),
+    ("Memory path", "memory vs file: no-upfront+deterministic",
+        api(READS_SE, flags=["--report-all", "--no-exact-upfront", "--no-1mm-upfront", "--deterministic-seeds"]),
+        api_mem(READS_SE, flags=["--report-all", "--no-exact-upfront", "--no-1mm-upfront", "--deterministic-seeds"])),
 ]
 
 

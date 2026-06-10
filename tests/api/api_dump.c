@@ -104,6 +104,14 @@ int main(int argc, char **argv) {
             config.max_dp_failures = atoi(argv[++i]);
         else if (strcmp(argv[i], "--max-seed-rounds") == 0 && i + 1 < argc)
             config.max_seed_rounds = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--lowseeds") == 0 && i + 1 < argc)
+            config.lowseeds = argv[++i];
+        else if (strcmp(argv[i], "--no-exact-upfront") == 0)
+            config.no_exact_upfront = 1;
+        else if (strcmp(argv[i], "--no-1mm-upfront") == 0)
+            config.no_1mm_upfront = 1;
+        else if (strcmp(argv[i], "--deterministic-seeds") == 0)
+            config.deterministic_seeds = 1;
         else if (strcmp(argv[i], "--no-unal") == 0)
             config.no_unal = 1;
         else if (strcmp(argv[i], "--xeq") == 0)

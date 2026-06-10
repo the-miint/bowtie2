@@ -135,6 +135,10 @@ void bt2_align_config_init(bt2_align_config_t *config) {
 	config->seed_length       = -1;
 	config->max_dp_failures   = -1;
 	config->max_seed_rounds   = -1;
+
+	/* v0.4 fields — lowseeds (NULL) and the no_exact_upfront /
+	   no_1mm_upfront / deterministic_seeds booleans (0) are already set
+	   by the memset above; no explicit override needed. */
 }
 
 /* ---- Error reporting ----------------------------------------------- */
@@ -219,6 +223,23 @@ void bt2_align_destroy(bt2_align_ctx_t *ctx) {
 	free(ctx);
 }
 
+/* Validate inter-option constraints that the bowtie2 parser also enforces.
+   Surfaced here so BOTH the file and memory paths return a clear
+   BT2_ERR_INVALID_CONFIG with a specific message: the file path runs the
+   parser inside bowtie(), whose throw would otherwise surface only as a
+   generic BT2_ERR_INTERNAL ("bowtie2 alignment returned non-zero exit"). */
+static int validate_config_constraints(bt2_align_ctx_t *ctx) {
+	const bt2_align_config_t *c = &ctx->config;
+	if (c->deterministic_seeds &&
+	    (!c->report_all || !c->no_exact_upfront || !c->no_1mm_upfront)) {
+		set_last_error(ctx,
+		    "deterministic_seeds requires report_all, no_exact_upfront, "
+		    "and no_1mm_upfront to all be set");
+		return BT2_ERR_INVALID_CONFIG;
+	}
+	return BT2_OK;
+}
+
 int bt2_align_run_files(bt2_align_ctx_t *ctx,
                         const char **mate1_files, size_t n_mate1,
                         const char **mate2_files, size_t n_mate2,
@@ -241,6 +262,11 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
 	}
 
 	ctx->last_error[0] = '\0';
+
+	{
+		int vc = validate_config_constraints(ctx);
+		if (vc != BT2_OK) return vc;
+	}
 
 	auto t_start = std::chrono::steady_clock::now();
 
@@ -435,6 +461,11 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 	if (ctx->config.seed < 0 || ctx->config.seed > INT32_MAX) {
 		set_last_error(ctx, "seed must be between 0 and 2147483647");
 		return BT2_ERR_INVALID_CONFIG;
+	}
+
+	{
+		int vc = validate_config_constraints(ctx);
+		if (vc != BT2_OK) return vc;
 	}
 
 	auto t_start = std::chrono::steady_clock::now();

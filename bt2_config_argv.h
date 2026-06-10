@@ -147,6 +147,18 @@ inline void append_config_argv(const bt2_align_config_t *config,
 		argv.push_back("-R");
 		argv.push_back(bufs->rounds);
 	}
+	if (config->lowseeds != NULL) {
+		/* String passthrough (like --score-min) to preserve the optional
+		   %/m/n suffix that scales the threshold relative to the reference. */
+		argv.push_back("--lowseeds");
+		argv.push_back(config->lowseeds);
+	}
+	/* Upfront flags emitted before --deterministic-seeds: the latter
+	   requires both to be off (the parser validates this post-parse, so
+	   order is not significant, but this reads as prerequisites-first). */
+	if (config->no_exact_upfront)    argv.push_back("--no-exact-upfront");
+	if (config->no_1mm_upfront)      argv.push_back("--no-1mm-upfront");
+	if (config->deterministic_seeds) argv.push_back("--deterministic-seeds");
 
 	/* SAM output */
 	if (config->no_unal) argv.push_back("--no-unal");

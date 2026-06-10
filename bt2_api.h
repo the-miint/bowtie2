@@ -269,6 +269,32 @@ typedef struct {
     int          mismatch_penalty_min; /**< Min mismatch penalty (--mp arg2, the MIN of MAX,MIN).
                                             Pairs with mismatch_penalty (--mp arg1 = MAX).
                                             Default: -1. Setting both enables e.g. --mp 1,1. */
+
+    /* ---- v0.4 fields (appended for ABI compatibility) ---- */
+
+    /* Effort / seeding (cont.) */
+    const char  *lowseeds;          /**< Discard low-quality seeds whose reference
+                                         (suffix-array) range exceeds a threshold
+                                         (-l/--lowseeds). NULL = not set (no cut).
+                                         Passed through verbatim, so an optional
+                                         suffix is honored: bare = absolute count,
+                                         '%' = /100, 'm' = /1000, 'n' = /1000000 of
+                                         the reference. Default: NULL. */
+    int          no_exact_upfront;  /**< Disable the exact end-to-end alignment
+                                         attempt before multiseed
+                                         (--no-exact-upfront). Default: 0 (on). */
+    int          no_1mm_upfront;    /**< Disable the 1-mismatch end-to-end alignment
+                                         attempt before multiseed
+                                         (--no-1mm-upfront). Default: 0 (on). */
+    int          deterministic_seeds; /**< Disable random subsampling of low-quality
+                                         seed ranges for reproducible seed selection
+                                         (-d/--deterministic-seeds). Default: 0.
+                                         COUPLING: requires report_all (-a) AND both
+                                         no_exact_upfront AND no_1mm_upfront set, and
+                                         is incompatible with -k. If these are not
+                                         satisfied, bt2_align_run*() returns
+                                         BT2_ERR_INVALID_CONFIG (the option parser
+                                         rejects the combination). */
 } bt2_align_config_t;
 
 /* --------------------------------------------------------------------
