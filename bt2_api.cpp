@@ -137,8 +137,8 @@ void bt2_align_config_init(bt2_align_config_t *config) {
 	config->max_seed_rounds   = -1;
 
 	/* v0.4 fields — lowseeds (NULL) and the no_exact_upfront /
-	   no_1mm_upfront / deterministic_seeds booleans (0) are already set
-	   by the memset above; no explicit override needed. */
+	   no_1mm_upfront / deterministic_seeds / memory_mapped booleans (0)
+	   are already set by the memset above; no explicit override needed. */
 }
 
 /* ---- Error reporting ----------------------------------------------- */

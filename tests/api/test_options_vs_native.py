@@ -346,6 +346,19 @@ CASES = [
     ("Memory path", "memory vs file: no-upfront+deterministic",
         api(READS_SE, flags=["--report-all", "--no-exact-upfront", "--no-1mm-upfront", "--deterministic-seeds"]),
         api_mem(READS_SE, flags=["--report-all", "--no-exact-upfront", "--no-1mm-upfront", "--deterministic-seeds"])),
+
+    # --- Cycle 14: Index loading (--mm / memory_mapped) ---
+    # --mm changes how the index is loaded, not the alignments; output must
+    # be identical to the default read-copy path.
+    ("Index loading", "mm (memory-mapped index)",
+        native(READS_SE, flags=["--mm"]),
+        api(READS_SE, flags=["--mm"])),
+    ("Index loading", "mm paired",
+        native(READS_1, READS_2, flags=["--mm"]),
+        api(READS_1, READS_2, flags=["--mm"])),
+    ("Memory path", "memory vs file: mm",
+        api(READS_SE, flags=["--mm"]),
+        api_mem(READS_SE, flags=["--mm"])),
 ]
 
 

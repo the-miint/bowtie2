@@ -133,7 +133,7 @@ extern "C" {
  * -------------------------------------------------------------------- */
 
 #define BT2_API_VERSION_MAJOR 0
-#define BT2_API_VERSION_MINOR 3
+#define BT2_API_VERSION_MINOR 4
 #define BT2_API_VERSION_PATCH 0
 
 /* --------------------------------------------------------------------
@@ -295,6 +295,18 @@ typedef struct {
                                          satisfied, bt2_align_run*() returns
                                          BT2_ERR_INVALID_CONFIG (the option parser
                                          rejects the combination). */
+    int          memory_mapped;     /**< Memory-map the index files (--mm) instead of
+                                         reading them into a private buffer. Default: 0.
+                                         Index pages become shared MAP_SHARED page-cache
+                                         pages, eliminating the per-load whole-index copy
+                                         and its major page faults. NOTE: this does NOT
+                                         keep the index resident across bt2_align_run*()
+                                         calls -- each call still reconstructs the index,
+                                         but the (re)load becomes cheap (mmap + minor
+                                         faults) rather than a full read-copy. Requires
+                                         the index files to stay on disk unmodified for
+                                         the context's lifetime. Mutually exclusive with
+                                         bowtie2's --shmem (not exposed). */
 } bt2_align_config_t;
 
 /* --------------------------------------------------------------------

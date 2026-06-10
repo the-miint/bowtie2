@@ -171,6 +171,7 @@ inline void append_config_argv(const bt2_align_config_t *config,
 	/* Other */
 	if (config->ignore_quals) argv.push_back("--ignore-quals");
 	if (config->reorder)      argv.push_back("--reorder");
+	if (config->memory_mapped) argv.push_back("--mm");
 }
 
 #endif /* BT2_CONFIG_ARGV_H */

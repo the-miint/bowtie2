@@ -189,6 +189,8 @@ int main(int argc, char **argv) {
             config.no_1mm_upfront = 1;
         else if (strcmp(argv[i], "--deterministic-seeds") == 0)
             config.deterministic_seeds = 1;
+        else if (strcmp(argv[i], "--mm") == 0)
+            config.memory_mapped = 1;
         else if (strcmp(argv[i], "--no-unal") == 0)
             config.no_unal = 1;
         else if (strcmp(argv[i], "--xeq") == 0)
