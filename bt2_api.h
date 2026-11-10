@@ -133,7 +133,7 @@ extern "C" {
  * -------------------------------------------------------------------- */
 
 #define BT2_API_VERSION_MAJOR 0
-#define BT2_API_VERSION_MINOR 4
+#define BT2_API_VERSION_MINOR 5
 #define BT2_API_VERSION_PATCH 0
 
 /* --------------------------------------------------------------------
@@ -197,7 +197,11 @@ typedef struct {
     size_t       struct_size;    /**< Set by bt2_align_config_init(). DO NOT set manually. */
     const char  *index_path;    /**< Filesystem path to bowtie2 index basename (required). */
     int64_t      seed;          /**< Random seed for reproducibility. Default: 0. */
-    int          nthreads;      /**< Number of alignment threads. Default: 1. */
+    int          nthreads;      /**< Number of alignment threads. Default: 1. At 1,
+                                     alignment runs on the calling thread.
+                                     bt2_align_create() refuses below 1, and above 1
+                                     in a WebAssembly build without pthreads, with
+                                     BT2_ERR_INVALID_CONFIG. */
     int          preset;        /**< Alignment preset (BT2_PRESET_*). Default: BT2_PRESET_SENSITIVE. */
     int          local_align;   /**< Nonzero for local alignment, 0 for end-to-end. Default: 0. */
     int          quiet;         /**< Nonzero to suppress non-error log messages. Default: 1.
@@ -510,7 +514,10 @@ typedef struct {
     const char **ref_paths;      /**< Array of reference FASTA file paths. */
     size_t       n_ref_paths;    /**< Number of reference file paths. */
     const char  *output_base;    /**< Output index basename (required). */
-    int          nthreads;       /**< Number of threads. Default: 1. */
+    int          nthreads;       /**< Number of threads. Default: 1.
+                                      bt2_build_create() refuses below 1, and above 1
+                                      in a WebAssembly build without pthreads, with
+                                      BT2_ERR_INVALID_CONFIG. */
     int64_t      seed;           /**< Random seed. Default: 0. */
     int          offrate;        /**< SA sampling: 1 in 2^N. Default: 4. */
     int          packed;         /**< Nonzero for packed strings (less RAM). Default: 0. */

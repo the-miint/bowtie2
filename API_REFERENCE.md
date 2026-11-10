@@ -7,7 +7,7 @@ pattern.
 
 **Header:** `bt2_api.h`
 **License:** GPL-3.0-or-later (same as bowtie2)
-**Version:** 0.3.0
+**Version:** 0.5.0
 
 ## Table of Contents
 
@@ -906,6 +906,39 @@ println!("cargo:rustc-link-lib=z");
 ---
 
 ## Changelog
+
+### 0.5.0
+
+- At `nthreads = 1`, `bt2_align_run` and `bt2_align_run_files` start no
+  thread: the worker, the read-ahead reader and the output writer run on the
+  calling thread, and so does `log_fn`. This is what lets the API run in a
+  WebAssembly build without pthreads (see [WebAssembly](#webassembly)).
+- `bt2_align_create` refuses `nthreads` below 1 with
+  `BT2_ERR_INVALID_CONFIG`. Before, `bt2_align_run` ran them at one thread
+  and `bt2_align_run_files` failed when the option parser refused `-p`.
+  `bt2_build_create` refuses them too; the build used to crash (SIGFPE). In
+  a WebAssembly build without pthreads both refuse `nthreads` above 1. The
+  reason goes to the config's `log_fn`.
+- A run on input bowtie2 rejects (mate files with different read counts, a
+  quality string shorter than its sequence) returns `BT2_ERR_INTERNAL` at any
+  `nthreads`, and the context stays usable. It used to end the process.
+- `log_fn` receives each line whole; a message written in several pieces
+  used to arrive as several calls, only the first at its level.
+- Each run closes the reference index files it opens; one descriptor leaked
+  per run.
+- ABI: no struct changes. `BT2_API_VERSION_MINOR` bumped 4 → 5, for the
+  `nthreads` values `bt2_align_create` now refuses.
+
+### 0.4.0
+
+- Append six fields to `bt2_align_config_t`: `mismatch_penalty_min` (the MIN
+  of `--mp MAX,MIN`), `lowseeds` (`-l/--lowseeds`), `no_exact_upfront`,
+  `no_1mm_upfront`, `deterministic_seeds` (`-d/--deterministic-seeds`) and
+  `memory_mapped` (`--mm`).
+- An invalid `--mp` returns `BT2_ERR_INVALID_CONFIG` instead of aborting.
+- With `memory_mapped`, each run unmaps the index files it mapped; mappings
+  used to accumulate across runs on one context.
+- ABI: fields appended only. `BT2_API_VERSION_MINOR` bumped 3 → 4.
 
 ### 0.3.0
 
