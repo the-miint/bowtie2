@@ -13,9 +13,6 @@
  *
  * Linked against bowtie2-align-s-lib (BT2_NO_MAIN); run from
  * PROJECT_SOURCE_DIR, where the lambda_virus index lives.
- *
- * NOTE: uses CHECK() (not assert()) because the library is built Release
- * with NDEBUG, which compiles assert() out entirely.
  */
 #include "bt2_api.h"
 #include "test_helpers.h"

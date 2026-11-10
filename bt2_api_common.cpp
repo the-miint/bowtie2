@@ -4,6 +4,7 @@
  */
 
 #include "bt2_api.h"
+#include "bt2_api_common.h"
 #include "bt2_log_streambuf.h"
 
 /* Static mutex definition for CerrRedirectGuard */
@@ -19,4 +20,20 @@ const char *bt2_strerror(int error_code) {
 		case BT2_ERR_INTERNAL:       return "Internal error";
 		default:                     return "Unknown error";
 	}
+}
+
+int bt2_check_nthreads(int nthreads, bt2_log_fn log_fn, void *log_user_data) {
+	const char *why = NULL;
+	if (nthreads < 1) {
+		why = "nthreads must be at least 1";
+	}
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+	else if (nthreads > 1) {
+		why = "nthreads must be 1: this WebAssembly build has no threads "
+		      "(it was built without pthreads)";
+	}
+#endif
+	if (why == NULL) return 1;
+	if (log_fn) log_fn(log_user_data, BT2_LOG_ERROR, why);
+	return 0;
 }

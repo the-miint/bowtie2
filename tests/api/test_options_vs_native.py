@@ -359,6 +359,17 @@ CASES = [
     ("Memory path", "memory vs file: mm",
         api(READS_SE, flags=["--mm"]),
         api_mem(READS_SE, flags=["--mm"])),
+
+    # --- Threads ---
+    # At one thread the API runs on the calling thread, so every case above
+    # does. These run its worker, reader and writer threads. --reorder keeps
+    # the CLI's records in input order; the API's are always.
+    ("Threads", "threads=2 reorder",
+        native(READS_SE, flags=["-p", "2", "--reorder"]),
+        api(READS_SE, flags=["--threads", "2", "--reorder"])),
+    ("Memory path", "memory vs file: threads=2 reorder",
+        api(READS_SE, flags=["--threads", "2", "--reorder"]),
+        api_mem(READS_SE, flags=["--threads", "2", "--reorder"])),
 ]
 
 
@@ -367,6 +378,8 @@ SUBSET_LABELS = frozenset({
     "local ma=10",
     "maxins=100 paired",
     "memory vs file: xeq+N=1",
+    "threads=2 reorder",
+    "memory vs file: threads=2 reorder",
 })
 
 
@@ -379,10 +392,9 @@ def main():
     cpu_cap = min(4, (os.cpu_count() or 2))
     workers = 2 if "TSAN_OPTIONS" in os.environ else cpu_cap
 
-    # BT2_FAST_SUBSET runs a 4-case smoke set covering reporting, scoring,
-    # paired-end, and memory-path translation. Used by the TSan CI job
-    # where the full 30-case sweep is prohibitively slow and the threading
-    # surface exercised here is already covered by test_align_basic/paired.
+    # BT2_FAST_SUBSET runs only the cases SUBSET_LABELS names. Used by the
+    # TSan CI job, where the full sweep is prohibitively slow; its threads=2
+    # cases are the ones that start threads in the API.
     if os.environ.get("BT2_FAST_SUBSET"):
         cases = [c for c in CASES if c[1] in SUBSET_LABELS]
         missing = SUBSET_LABELS - {c[1] for c in cases}

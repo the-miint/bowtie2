@@ -1,5 +1,11 @@
 # API tests — compile as C to verify C compatibility of bt2_api.h
 
+# The tests check with assert(). Every build type CI uses defines NDEBUG (Release
+# in the top-level CMakeLists.txt, RelWithDebInfo through CMake's default flags),
+# which compiles those checks out. Undefine it for the targets in this directory;
+# the libraries they link keep their own flags.
+add_compile_options(-UNDEBUG)
+
 # Helper macro for C API test executables
 macro(add_api_test name)
   add_executable(${name} ${name}.c)
@@ -10,6 +16,8 @@ macro(add_api_test name)
   add_test(NAME api-${name}
     COMMAND ${name}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  # A test that cannot run here exits 77 (TEST_SKIP in test_helpers.h)
+  set_tests_properties(api-${name} PROPERTIES SKIP_RETURN_CODE 77)
 endmacro()
 
 # Phase 0 tests
@@ -54,11 +62,35 @@ add_api_test(test_direct_no_tempfile)
 # across repeated runs on one context (munmap-on-teardown fix).
 add_api_test(test_mm_no_vma_leak)
 
+# Repeated runs on one context leave no file descriptor open.
+add_api_test(test_fd_no_leak)
+
 # Phase 5 tests — error handling and log callback
 add_api_test(test_error_no_exit)
 add_api_test(test_error_recovery)
 add_api_test(test_log_callback)
 add_api_test(test_error_invalid_mp)
+
+# At nthreads=1 the aligner runs on the calling thread, starting no thread
+add_api_test(test_align_inline)
+# An input error the read parser throws comes back as an error return, at
+# one thread and at two
+add_api_test(test_error_read_parse)
+
+# OutFileBuf reports a failed write, with and without its writer thread (a
+# C++ unit test). A buffer the writer does not hand back makes close() wait
+# forever, so the test gets a short timeout.
+add_executable(test_outfilebuf_write_error test_outfilebuf_write_error.cpp)
+target_link_libraries(test_outfilebuf_write_error bowtie2-align-s-lib)
+# Where it writes its one file
+target_compile_definitions(test_outfilebuf_write_error PRIVATE
+  TEST_SCRATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME api-test_outfilebuf_write_error
+  COMMAND test_outfilebuf_write_error
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_tests_properties(api-test_outfilebuf_write_error PROPERTIES
+  SKIP_RETURN_CODE 77
+  TIMEOUT 120)
 
 # Phase 6 tests — index builder API (link against build library)
 macro(add_build_api_test name)
@@ -70,6 +102,8 @@ macro(add_build_api_test name)
   add_test(NAME api-${name}
     COMMAND ${name}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  # A test that cannot run here exits 77 (TEST_SKIP in test_helpers.h)
+  set_tests_properties(api-${name} PROPERTIES SKIP_RETURN_CODE 77)
 endmacro()
 
 add_build_api_test(test_build_header)
@@ -88,6 +122,16 @@ set_target_properties(test_build_then_align PROPERTIES
   C_STANDARD_REQUIRED ON)
 add_test(NAME api-test_build_then_align
   COMMAND test_build_then_align
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+# The aligner's and the builder's create check nthreads (combined lib)
+add_executable(test_nthreads_config test_nthreads_config.c)
+target_link_libraries(test_nthreads_config bowtie2-combined-s-lib)
+set_target_properties(test_nthreads_config PROPERTIES
+  C_STANDARD 11
+  C_STANDARD_REQUIRED ON)
+add_test(NAME api-test_nthreads_config
+  COMMAND test_nthreads_config
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 # Reproducer for GPL-boundary macOS aarch64 SIGSEGV with all-N + no_unal

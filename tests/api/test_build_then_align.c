@@ -107,7 +107,7 @@ int main(void) {
                 cleanup_index(idx_base);
                 return 1;
             }
-            if (!(output->flag[i] & 0x4)) any_mapped = 1; /* not unmapped */
+            if (!(output->flag[i] & SAM_FLAG_UNMAPPED)) any_mapped = 1;
         }
         if (!any_mapped) {
             fprintf(stderr, "FAIL: no reads aligned against API-built index\n");

@@ -18,6 +18,7 @@
  */
 
 #include "bt2_api.h"
+#include "bt2_api_common.h"
 #include "bt2_api_internal.h"
 #include "bt2_api_exception.h"
 #include "bt2_driver_api.h"
@@ -154,6 +155,11 @@ const char *bt2_align_last_error(const bt2_align_ctx_t *ctx) {
 bt2_align_ctx_t *bt2_align_create(const bt2_align_config_t *config,
                                   int *error_out) {
 	if (!config || config->struct_size != sizeof(bt2_align_config_t)) {
+		if (error_out) *error_out = BT2_ERR_INVALID_CONFIG;
+		return NULL;
+	}
+	if (!bt2_check_nthreads(config->nthreads, config->log_fn,
+	                        config->log_user_data)) {
 		if (error_out) *error_out = BT2_ERR_INVALID_CONFIG;
 		return NULL;
 	}
@@ -334,7 +340,7 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
 	argv.push_back("/dev/null");
 #endif
 
-	int sink_nthreads = ctx->config.nthreads > 0 ? ctx->config.nthreads : 1;
+	int sink_nthreads = ctx->config.nthreads; /* >= 1: bt2_align_create checks */
 
 	/* Lock, set up columnar sink globals, call bowtie, retrieve results */
 	int rc;
@@ -470,7 +476,7 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 
 	auto t_start = std::chrono::steady_clock::now();
 
-	int sink_nthreads = ctx->config.nthreads > 0 ? ctx->config.nthreads : 1;
+	int sink_nthreads = ctx->config.nthreads; /* >= 1: bt2_align_create checks */
 	bt2_align_output_t *output = NULL;
 
 	{

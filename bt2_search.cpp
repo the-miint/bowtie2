@@ -28,6 +28,8 @@
 #include <stdexcept>
 #include <stdlib.h>
 #include <string>
+#include <exception>
+#include <mutex>
 #include <thread>
 #include <time.h>
 #include <utility>
@@ -110,6 +112,19 @@ static int nthreads;      // number of pthreads operating concurrently
 static int thread_ceiling;// maximum number of threads user wants bowtie to use
 static string thread_stealing_dir; // keep track of pids in this directory
 static bool thread_stealing;// true iff thread stealing is in use
+
+// The C API at one thread runs the alignment worker, the read-ahead reader and
+// the output writer on the calling thread, starting no thread: a WebAssembly
+// build without pthreads cannot start one. The CLI runs each on a thread of
+// its own at any -p.
+static bool runInline() {
+#ifdef BT2_NO_MAIN
+	return nthreads == 1 && !thread_stealing;
+#else
+	return false;
+#endif
+}
+
 static int outType;       // style of output
 static bool noRefNames;   // true -> print reference indexes; not names
 static uint32_t lowseeds; // size of seed range above which a seed is considered low quality, and thus discarded (0 disables the cut)
@@ -1950,6 +1965,8 @@ createPatsrcFactory(
 #define PTHREAD_ATTRS (PTHREAD_CREATE_JOINABLE | PTHREAD_CREATE_DETACHED)
 
 static PatternSourceReadAheadFactory* multiseed_readahead_factory;
+static std::mutex               multiseed_error_mutex;
+static std::exception_ptr       multiseed_error; // first throw of a worker thread
 static Ebwt*                    multiseed_ebwtFw;
 static Ebwt*                    multiseed_ebwtBw;
 static Scoring*                 multiseed_sc;
@@ -4636,6 +4653,27 @@ static void multiseedSearchWorker_2p5(void *vp) {
 	return;
 }
 
+/**
+ * Thread entry for a search worker. An exception thrown on a thread ends the
+ * process (std::terminate), so whatever the worker throws (an input error,
+ * or bad_alloc) is kept here instead: the first one, for multiseedSearch to
+ * rethrow once every worker is done. The reader then reports the end of the
+ * input, so the other workers stop, and this worker counts itself done, as it
+ * would have.
+ */
+static void multiseedSearchWorkerThread(void (*worker)(void*), void *vp) {
+	try {
+		worker(vp);
+	} catch(...) {
+		{
+			std::lock_guard<std::mutex> lk(multiseed_error_mutex);
+			if(!multiseed_error) multiseed_error = std::current_exception();
+		}
+		multiseed_readahead_factory->stop();
+		((thread_tracking_pair*)vp)->done->fetch_add(1);
+	}
+}
+
 #ifndef _WIN32
 /**
  * Print friendly-ish message pertaining to failed system call.
@@ -4827,6 +4865,11 @@ static void multiseedSearch(
 	multiseed_ebwtBw = ebwtBw;
 	multiseed_sc     = &sc;
 	multiseed_metricsOfb      = metricsOfb;
+	{
+		// An error kept by a search that ended before taking it is not ours.
+		std::lock_guard<std::mutex> lk(multiseed_error_mutex);
+		multiseed_error = nullptr;
+	}
 	Timer *_t = new Timer(cerr, "Time loading reference: ", timing);
 	unique_ptr<BitPairReference> refs(
 		new BitPairReference(
@@ -4861,7 +4904,7 @@ static void multiseedSearch(
 	bool readahead_useCVLocks = nthreads<=16; // Note: We may want to consider other factors, too
 
 	// Important: Need at least nthreads+1 elements, more is OK
-	PatternSourceReadAheadFactory readahead_factory(patsrc,pp,4*nthreads+1,readahead_useCVLocks);
+	PatternSourceReadAheadFactory readahead_factory(patsrc,pp,4*nthreads+1,readahead_useCVLocks,!runInline());
 	multiseed_readahead_factory = &readahead_factory;
 
 	tps.resize(std::max(nthreads, thread_ceiling));
@@ -4918,10 +4961,22 @@ static void multiseedSearch(
 			tps[i].tid = i;
 			tps[i].done = &all_threads_done;
 
+			if(runInline()) {
+				// Run the one worker here; it counts itself done.
+				threads.push_back(NULL);
+				if(bowtie2p5) {
+					multiseedSearchWorker_2p5((void*)&tps[i]);
+				} else {
+					multiseedSearchWorker((void*)&tps[i]);
+				}
+				continue;
+			}
 			if(bowtie2p5) {
-				threads.push_back(new std::thread(multiseedSearchWorker_2p5, (void*)&tps[i]));
+				threads.push_back(new std::thread(multiseedSearchWorkerThread,
+					multiseedSearchWorker_2p5, (void*)&tps[i]));
 			} else {
-				threads.push_back(new std::thread(multiseedSearchWorker, (void*)&tps[i]));
+				threads.push_back(new std::thread(multiseedSearchWorkerThread,
+					multiseedSearchWorker, (void*)&tps[i]));
 			}
 			threads[i]->detach();
 			SLEEP(10);
@@ -4946,6 +5001,17 @@ static void multiseedSearch(
 			del_pid(thread_stealing_dir.c_str(), pid);
 		}
 #endif
+		// What a worker thread or the reader thread threw (an input error,
+		// say) is rethrown here, on the calling thread, where driver()'s
+		// caller catches it.
+		std::exception_ptr error;
+		{
+			std::lock_guard<std::mutex> lk(multiseed_error_mutex);
+			std::swap(error, multiseed_error);
+		}
+		std::exception_ptr read_error = readahead_factory.finish();
+		if(!error) error = read_error;
+		if(error) std::rethrow_exception(error);
 	}
 	if(!metricsPerRead && (metricsOfb != NULL || metricsStderr)) {
 		metrics.reportInterval(metricsOfb, metricsStderr, true, NULL);
@@ -4999,11 +5065,13 @@ static void driver(
 	if(gVerbose || startVerbose) {
 		cerr << "Creating PatternSource: "; logTime(cerr, true);
 	}
+	// What driver() makes for itself is owned through unique_ptr, so a throw
+	// out of the search frees it. The columnar sink it makes for the API
+	// (g_api_sink) is the API's to free.
 	PatternComposer *patsrc;
-	bool patsrc_owned;
+	unique_ptr<PatternComposer> patsrc_owner; // set when driver() makes patsrc
 	if(api_patsrc != NULL) {
 		patsrc = api_patsrc;
-		patsrc_owned = false;
 	} else {
 		patsrc = PatternComposer::setupPatternComposer(
 			queries,     // singles, from argv
@@ -5018,18 +5086,15 @@ static void driver(
 #endif
 			pp,          // read read-in parameters
 			gVerbose || startVerbose); // be talkative
-		patsrc_owned = true;
+		patsrc_owner.reset(patsrc);
 	}
 	// Open hit output file
 	if(gVerbose || startVerbose) {
 		cerr << "Opening hit output file: "; logTime(cerr, true);
 	}
-	OutFileBuf *fout;
-	if(!outfile.empty()) {
-		fout = new OutFileBuf(outfile.c_str(), false);
-	} else {
-		fout = new OutFileBuf();
-	}
+	unique_ptr<OutFileBuf> fout(!outfile.empty() ?
+		new OutFileBuf(outfile.c_str(), false, !runInline()) :
+		new OutFileBuf(!runInline()));
 	// Initialize Ebwt object and read in header
 	if(gVerbose || startVerbose) {
 		cerr << "About to initialize fw Ebwt: "; logTime(cerr, true);
@@ -5168,11 +5233,10 @@ static void driver(
 		// then instruct the sink to "retain" hits in a vector in
 		// memory so that we can easily sanity check them later on
 		AlnSink *mssink = NULL;
-		bool mssink_owned = true; // whether driver() should delete mssink
+		unique_ptr<AlnSink> mssink_owner; // set when driver() owns mssink
 		if(api_sink != NULL) {
 			// Direct API path: caller provides the sink
 			mssink = api_sink;
-			mssink_owned = false;
 		}
 #ifdef BT2_NO_MAIN
 		// Library mode via bowtie(): g_api_columnar_nthreads > 0 means
@@ -5186,7 +5250,6 @@ static void driver(
 					(size_t)g_api_columnar_nthreads,
 					samNoUnal);
 				g_api_sink = mssink;
-				mssink_owned = false;
 			}
 		}
 		if(mssink == NULL)
@@ -5199,6 +5262,7 @@ static void driver(
 				samc,         // settings & routines for SAM output
 				refnames,     // reference names
 				gQuiet);      // don't print alignment summary at end
+			mssink_owner.reset(mssink);
 			if(!samNoHead) {
 				bool printHd = true, printSq = true;
 				BTString buf;
@@ -5216,9 +5280,9 @@ static void driver(
 			cerr << "Dispatching to search driver: "; logTime(cerr, true);
 		}
 		// Set up global constraint
-		OutFileBuf *metricsOfb = NULL;
+		unique_ptr<OutFileBuf> metricsOfb;
 		if(!metricsFile.empty() && metricsIval > 0) {
-			metricsOfb = new OutFileBuf(metricsFile);
+			metricsOfb.reset(new OutFileBuf(metricsFile, false, !runInline()));
 		}
 		// Do the search for all input reads
 		assert(patsrc != NULL);
@@ -5255,7 +5319,7 @@ static void driver(
 				*mssink, // hit sink
 				ebwt,    // BWT
 				&ebwtBw, // BWT'
-				metricsOfb);
+				metricsOfb.get());
                 } else {
 			multiseedSearch(
 				sc,      // scoring scheme
@@ -5264,7 +5328,7 @@ static void driver(
 				*mssink, // hit sink
 				ebwt,    // BWT
 				NULL,    // BWT'
-				metricsOfb);
+				metricsOfb.get());
 		}
 
 		// Evict any loaded indexes from memory
@@ -5286,16 +5350,11 @@ static void driver(
 		oq.flush(true);
 		assert_eq(oq.numStarted(), oq.numFinished());
 		assert_eq(oq.numStarted(), oq.numFlushed());
-		if(patsrc_owned) {
-			delete patsrc;
-		}
-		if(mssink_owned) {
-			delete mssink;
-		}
-		delete metricsOfb;
-		if(fout != NULL) {
-			delete fout;
-		}
+		patsrc_owner.reset();
+		mssink_owner.reset();
+		metricsOfb.reset();
+		fout->close(); // a failed write throws here, not in the destructor
+		fout.reset();
 	}
 }
 
@@ -5343,7 +5402,7 @@ void apply_config_to_statics(const bt2_align_config_t *config,
 
 	// Threads
 	char threads_buf[32];
-	snprintf(threads_buf, sizeof(threads_buf), "%d", config->nthreads > 0 ? config->nthreads : 1);
+	snprintf(threads_buf, sizeof(threads_buf), "%d", config->nthreads); // >= 1: bt2_align_create checks
 	argv.push_back("-p");
 	argv.push_back(threads_buf);
 

@@ -13,12 +13,12 @@
  * per process, where process exit masks it).
  *
  * Linux-only: it reads /proc/self/maps. On platforms without it the test
- * skips (passes).
- *
- * NOTE: API tests are built with NDEBUG, so assert() is a no-op. Use explicit
- * checks that return non-zero on failure.
+ * skips (exit 77, which ctest reports as skipped). It skips in WebAssembly
+ * too: a /proc/self/maps the module can open there is the host's, not its
+ * own.
  */
 #include "bt2_api.h"
+#include "test_helpers.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -40,9 +40,13 @@ static int count_index_vmas(void) {
 }
 
 int main(void) {
+#ifdef __EMSCRIPTEN__
+    printf("test_mm_no_vma_leak: SKIP (WebAssembly: /proc/self/maps is the host's)\n");
+    return TEST_SKIP;
+#endif
     if (count_index_vmas() < 0) {
         printf("test_mm_no_vma_leak: SKIP (no /proc/self/maps; non-Linux)\n");
-        return 0;
+        return TEST_SKIP;
     }
 
     bt2_align_config_t config;

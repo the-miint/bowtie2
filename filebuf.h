@@ -630,11 +630,14 @@ class OutFileBuf {
 public:
 
 	/**
-	 * Open a new output stream to a file with given name.
+	 * Open a new output stream to a file with given name. With async
+	 * false no writer thread is started, and flush() writes on the
+	 * calling thread.
 	 */
-	OutFileBuf(const std::string& out, bool binary = false) :
+	OutFileBuf(const std::string& out, bool binary = false, bool async = true) :
 		name_(out.c_str()), out_(NULL), cur_(0), closed_(false),
-		asyncData_(out_), asynct_(writeAsync, &asyncData_),
+		asyncData_(out_),
+		asynct_(startWriter(async, &asyncData_)),
 		buf1_(new char[BUF_SZ]), buf2_(new char[BUF_SZ]), cap1_(BUF_SZ), cap2_(BUF_SZ),
 		buf_(buf1_), cap_(cap1_)
 	{
@@ -648,11 +651,14 @@ public:
 	}
 
 	/**
-	 * Open a new output stream to a file with given name.
+	 * Open a new output stream to a file with given name. With async
+	 * false no writer thread is started, and flush() writes on the
+	 * calling thread.
 	 */
-	OutFileBuf(const char *out, bool binary = false) :
+	OutFileBuf(const char *out, bool binary = false, bool async = true) :
 		name_(out), out_(NULL), cur_(0), closed_(false),
-		asyncData_(out_), asynct_(writeAsync, &asyncData_),
+		asyncData_(out_),
+		asynct_(startWriter(async, &asyncData_)),
 		buf1_(new char[BUF_SZ]), buf2_(new char[BUF_SZ]), cap1_(BUF_SZ), cap2_(BUF_SZ),
 		buf_(buf1_), cap_(cap1_)
 	{
@@ -665,11 +671,13 @@ public:
 	}
 
 	/**
-	 * Open a new output stream to standard out.
+	 * Open a new output stream to standard out. With async false no writer
+	 * thread is started.
 	 */
-	OutFileBuf() :
+	explicit OutFileBuf(bool async = true) :
 		name_("cout"), out_(stdout), cur_(0), closed_(false),
-		asyncData_(out_), asynct_(writeAsync, &asyncData_),
+		asyncData_(out_),
+		asynct_(startWriter(async, &asyncData_)),
 		buf1_(new char[BUF_SZ]), buf2_(new char[BUF_SZ]), cap1_(BUF_SZ), cap2_(BUF_SZ),
 		buf_(buf1_), cap_(cap1_) {}
 	
@@ -677,21 +685,12 @@ public:
 	 * Close buffer when object is destroyed.
 	 */
 	~OutFileBuf() {
-		close();
+		/* A throw out of a destructor ends the process, so close()'s
+		   rethrow of a failed write stops here; writeFailed() reported the
+		   failure through std::cerr when it happened. */
+		try { close(); } catch(...) {}
 		asyncData_.notifyAbort();
-		asynct_.join();
-		/* Propagate async thread errors — but not in destructor
-		   (throwing from destructor is UB during stack unwind).
-		   Log and swallow instead. */
-		if(asyncData_.async_exception) {
-			try {
-				std::rethrow_exception(asyncData_.async_exception);
-			} catch(const std::exception& e) {
-				std::fprintf(stderr, "OutFileBuf async error: %s\n", e.what());
-			} catch(...) {
-				std::fprintf(stderr, "OutFileBuf async error (unknown)\n");
-			}
-		}
+		if(asynct_.joinable()) asynct_.join();
 		delete[] buf2_;
 		delete[] buf1_;
 	}
@@ -782,11 +781,16 @@ public:
 		if(closed_) return;
 		if(cur_ > 0) flush();
 		asyncData_.waitIdle();
-		asyncData_.checkAsyncError(); /* propagate async thread errors */
 		closed_ = true;
 		if(out_ != stdout) {
-			fclose(out_);
+			/* fclose() writes what stdio still buffers, which can fail
+			   too */
+			errno = 0;
+			if(fclose(out_) != 0) asyncData_.writeFailed(errno);
 		}
+		/* rethrow a failed write, with the file closed so a second
+		   close() (the destructor's) neither rethrows nor leaks it */
+		asyncData_.checkAsyncError();
 	}
 
 	/**
@@ -798,6 +802,10 @@ public:
 	}
 
 	void flush() {
+		if(!asynct_.joinable()) {
+			flushSync();
+			return;
+		}
 		// there still could have been an outstanding async write
 		asyncData_.waitIdle();
 		// start the async write
@@ -904,6 +912,15 @@ private:
 		resizeBuffer(newCap);
 	}
 
+	/**
+	 * flush() without a writer thread: write the buffer on the calling
+	 * thread, through writeAll() as the writer thread does.
+	 */
+	void flushSync() {
+		writeAll(asyncData_, buf_, cur_);
+		cur_ = 0;
+	}
+
 	class AsyncData {
 	public:
 		bool abort; // the async thread will abort when this is set to true
@@ -915,8 +932,8 @@ private:
 		std::mutex m;
 		std::condition_variable cv;
 
-		bool epipe_occurred;           // set by writeAsync on EPIPE
-		std::exception_ptr async_exception; // propagates async errors to caller
+		bool epipe_occurred;                // a write hit EPIPE: the pipe's reading end closed
+		std::exception_ptr async_exception; // a failed write (writeFailed()), for close()
 
 		// m and cv default constructors are OK as-is
 		AsyncData(FILE* &_out) : abort(false), out(_out), buf(NULL),
@@ -935,8 +952,23 @@ private:
 			while(buf!=NULL) cv.wait(lk);
 		}
 
-		/* Rethrow any exception from the async thread in the caller's
-		   context. Call after the async thread has exited. */
+		/* Keep a failed write, with errno err, unless one is kept already:
+		   EPIPE in epipe_occurred, anything else, reported through
+		   std::cerr, in async_exception. */
+		void writeFailed(int err) {
+			if(epipe_occurred || async_exception) return;
+			if(err == EPIPE) {
+				epipe_occurred = true;
+				return;
+			}
+			std::cerr << "Error: could not write the output: " << strerror(err)
+			          << std::endl;
+			async_exception = std::make_exception_ptr(
+				std::runtime_error("writing the output failed"));
+		}
+
+		/* Rethrow a failed write in the caller's context. Call when no
+		   write is in flight (after waitIdle()). */
 		void checkAsyncError() {
 			if(async_exception) {
 				std::rethrow_exception(async_exception);
@@ -975,41 +1007,45 @@ private:
 
 	};
 
+	/**
+	 * Write len bytes of buf to d.out, unless an earlier write failed. A
+	 * failure is kept in d (writeFailed()), and close() rethrows it; an
+	 * EPIPE (the pipe's reading end closed) ends the output without one.
+	 * The bytes after a failure are dropped. The writer thread and
+	 * flushSync() both write through here.
+	 *
+	 * One fwrite: it retries a partial write itself, so writing less is a
+	 * failure. Retrying here would hide it, since a stream that failed
+	 * counts what it only buffered as written.
+	 */
+	static void writeAll(AsyncData &d, const char *buf, size_t len) {
+		if(d.epipe_occurred || d.async_exception) return;
+		errno = 0;
+		if(fwrite((const void *)buf, 1, len, d.out) < len) {
+			d.writeFailed(errno);
+		}
+	}
+
 	static void writeAsync(AsyncData *asyncDataPtr) {
 		AsyncData &asyncData = *asyncDataPtr;
 		bool abort = false;
-		try {
 		while(!abort) {
 			abort = asyncData.waitForBuf();
 			if(abort) break;
-			/* Write the full buffer, handling partial writes correctly
-			   by advancing the pointer and decrementing remaining. */
-			const char *ptr = asyncData.buf;
-			size_t remaining = asyncData.cur;
-			while(remaining > 0) {
-				size_t n = fwrite((const void *)ptr, 1, remaining, asyncData.out);
-				if(errno == EPIPE) {
-					asyncData.epipe_occurred = true;
-					return; /* graceful exit instead of exit() */
-				}
-				if(n == 0 || feof(asyncData.out)) {
-					break;
-				}
-				ptr += n;
-				remaining -= n;
+			try {
+				writeAll(asyncData, asyncData.buf, asyncData.cur);
+			} catch (...) {
+				asyncData.async_exception = std::current_exception();
 			}
-
-			if(remaining != 0) {
-				perror("fwrite");
-				asyncData.async_exception = std::make_exception_ptr(
-					std::runtime_error("fwrite failed in async output thread"));
-				return;
-			}
+			/* After a failed write too: flush() and close() wait for the
+			   buffer to be handed back. */
 			abort = asyncData.writeComplete();
 		}
-		} catch (...) {
-			asyncData.async_exception = std::current_exception();
-		}
+	}
+
+	// The writer thread, or none (async false), when flush() writes itself.
+	static std::thread startWriter(bool async, AsyncData *d) {
+		return async ? std::thread(writeAsync, d) : std::thread();
 	}
 
 	static constexpr size_t BUF_SZ = 16ul * 1024ul;

@@ -10,6 +10,7 @@
  */
 
 #include "bt2_api.h"
+#include "bt2_api_common.h"
 #include "bt2_build_api_internal.h"
 #include "bt2_api_exception.h"
 #include "bt2_log_streambuf.h"
@@ -60,6 +61,11 @@ void bt2_build_config_init(bt2_build_config_t *config) {
 bt2_build_ctx_t *bt2_build_create(const bt2_build_config_t *config,
                                   int *error_out) {
 	if (!config || config->struct_size != sizeof(bt2_build_config_t)) {
+		if (error_out) *error_out = BT2_ERR_INVALID_CONFIG;
+		return NULL;
+	}
+	if (!bt2_check_nthreads(config->nthreads, config->log_fn,
+	                        config->log_user_data)) {
 		if (error_out) *error_out = BT2_ERR_INVALID_CONFIG;
 		return NULL;
 	}
