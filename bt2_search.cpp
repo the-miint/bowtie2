@@ -4864,6 +4864,11 @@ static void multiseedSearch(
 	multiseed_ebwtBw = ebwtBw;
 	multiseed_sc     = &sc;
 	multiseed_metricsOfb      = metricsOfb;
+	{
+		// An error kept by a search that ended before taking it is not ours.
+		std::lock_guard<std::mutex> lk(multiseed_error_mutex);
+		multiseed_error = nullptr;
+	}
 	Timer *_t = new Timer(cerr, "Time loading reference: ", timing);
 	unique_ptr<BitPairReference> refs(
 		new BitPairReference(
@@ -5059,8 +5064,8 @@ static void driver(
 	if(gVerbose || startVerbose) {
 		cerr << "Creating PatternSource: "; logTime(cerr, true);
 	}
-	// Owned through unique_ptr, so a throw out of the search (an input
-	// error, on the calling thread) frees what driver() made.
+	// What driver() makes is owned through unique_ptr, so a throw out of the
+	// search (an input error) frees it.
 	PatternComposer *patsrc;
 	unique_ptr<PatternComposer> patsrc_owner; // set when driver() makes patsrc
 	if(api_patsrc != NULL) {
@@ -5087,7 +5092,7 @@ static void driver(
 	}
 	unique_ptr<OutFileBuf> fout(!outfile.empty() ?
 		new OutFileBuf(outfile.c_str(), false, !runInline()) :
-		new OutFileBuf());
+		new OutFileBuf(!runInline()));
 	// Initialize Ebwt object and read in header
 	if(gVerbose || startVerbose) {
 		cerr << "About to initialize fw Ebwt: "; logTime(cerr, true);
@@ -5226,11 +5231,10 @@ static void driver(
 		// then instruct the sink to "retain" hits in a vector in
 		// memory so that we can easily sanity check them later on
 		AlnSink *mssink = NULL;
-		bool mssink_owned = true; // whether driver() should delete mssink
+		unique_ptr<AlnSink> mssink_owner; // set when driver() owns mssink
 		if(api_sink != NULL) {
 			// Direct API path: caller provides the sink
 			mssink = api_sink;
-			mssink_owned = false;
 		}
 #ifdef BT2_NO_MAIN
 		// Library mode via bowtie(): g_api_columnar_nthreads > 0 means
@@ -5244,7 +5248,6 @@ static void driver(
 					(size_t)g_api_columnar_nthreads,
 					samNoUnal);
 				g_api_sink = mssink;
-				mssink_owned = false;
 			}
 		}
 		if(mssink == NULL)
@@ -5257,6 +5260,7 @@ static void driver(
 				samc,         // settings & routines for SAM output
 				refnames,     // reference names
 				gQuiet);      // don't print alignment summary at end
+			mssink_owner.reset(mssink);
 			if(!samNoHead) {
 				bool printHd = true, printSq = true;
 				BTString buf;
@@ -5274,9 +5278,9 @@ static void driver(
 			cerr << "Dispatching to search driver: "; logTime(cerr, true);
 		}
 		// Set up global constraint
-		OutFileBuf *metricsOfb = NULL;
+		unique_ptr<OutFileBuf> metricsOfb;
 		if(!metricsFile.empty() && metricsIval > 0) {
-			metricsOfb = new OutFileBuf(metricsFile);
+			metricsOfb.reset(new OutFileBuf(metricsFile, false, !runInline()));
 		}
 		// Do the search for all input reads
 		assert(patsrc != NULL);
@@ -5313,7 +5317,7 @@ static void driver(
 				*mssink, // hit sink
 				ebwt,    // BWT
 				&ebwtBw, // BWT'
-				metricsOfb);
+				metricsOfb.get());
                 } else {
 			multiseedSearch(
 				sc,      // scoring scheme
@@ -5322,7 +5326,7 @@ static void driver(
 				*mssink, // hit sink
 				ebwt,    // BWT
 				NULL,    // BWT'
-				metricsOfb);
+				metricsOfb.get());
 		}
 
 		// Evict any loaded indexes from memory
@@ -5345,10 +5349,9 @@ static void driver(
 		assert_eq(oq.numStarted(), oq.numFinished());
 		assert_eq(oq.numStarted(), oq.numFlushed());
 		patsrc_owner.reset();
-		if(mssink_owned) {
-			delete mssink;
-		}
-		delete metricsOfb;
+		mssink_owner.reset();
+		metricsOfb.reset();
+		fout->close(); // a failed write throws here, not in the destructor
 		fout.reset();
 	}
 }

@@ -49,4 +49,37 @@ static int file_exists(const char *path) {
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
+#include <dirent.h>
+#endif
+
+/* Open file descriptors in this process (/dev/fd, on Linux and macOS), or -1
+   where they can't be counted: no /dev/fd, or WebAssembly, where the
+   /dev/fd the module can open is the host's. */
+static int count_open_fds(void) {
+#ifdef __EMSCRIPTEN__
+    return -1;
+#else
+    DIR *d = opendir("/dev/fd");
+    if (d == NULL) return -1;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] != '.') n++;
+    }
+    closedir(d);
+    return n;
+#endif
+}
+
+/* A failed check: print the printf-style message and count it in the
+   test's own `static int g_failures`. */
+#define CHECK_MSG(cond, ...) do { \
+    if (!(cond)) { \
+        fprintf(stderr, "FAIL: " __VA_ARGS__); \
+        fprintf(stderr, "\n"); \
+        g_failures++; \
+    } \
+} while (0)
+
 #endif /* TEST_HELPERS_H */

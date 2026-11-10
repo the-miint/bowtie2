@@ -340,7 +340,7 @@ int bt2_align_run_files(bt2_align_ctx_t *ctx,
 	argv.push_back("/dev/null");
 #endif
 
-	int sink_nthreads = ctx->config.nthreads > 0 ? ctx->config.nthreads : 1;
+	int sink_nthreads = ctx->config.nthreads; /* >= 1: bt2_align_create checks */
 
 	/* Lock, set up columnar sink globals, call bowtie, retrieve results */
 	int rc;
@@ -476,7 +476,7 @@ int bt2_align_run(bt2_align_ctx_t *ctx,
 
 	auto t_start = std::chrono::steady_clock::now();
 
-	int sink_nthreads = ctx->config.nthreads > 0 ? ctx->config.nthreads : 1;
+	int sink_nthreads = ctx->config.nthreads; /* >= 1: bt2_align_create checks */
 	bt2_align_output_t *output = NULL;
 
 	{

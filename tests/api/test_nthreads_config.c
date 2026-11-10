@@ -12,6 +12,7 @@
  * PROJECT_SOURCE_DIR, where the example index and reference live.
  */
 #include "bt2_api.h"
+#include "test_helpers.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -25,14 +26,6 @@
 #define REF   "example/reference/lambda_virus.fa"
 
 static int g_failures = 0;
-
-#define CHECK(cond, ...) do { \
-    if (!(cond)) { \
-        fprintf(stderr, "FAIL: " __VA_ARGS__); \
-        fprintf(stderr, "\n"); \
-        g_failures++; \
-    } \
-} while (0)
 
 /* Set when log_fn gets an error naming nthreads. */
 static int g_logged_nthreads;
@@ -79,13 +72,13 @@ static void expect(const char *what, int nthreads, int (*try_create)(int),
     g_logged_nthreads = 0;
     int rc = try_create(nthreads);
     if (want_ok) {
-        CHECK(rc == BT2_OK, "%s refused nthreads=%d: %s", what, nthreads,
-              bt2_strerror(rc));
+        CHECK_MSG(rc == BT2_OK, "%s refused nthreads=%d: %s", what, nthreads,
+                  bt2_strerror(rc));
     } else {
-        CHECK(rc == BT2_ERR_INVALID_CONFIG, "%s with nthreads=%d returned %s, "
-              "not BT2_ERR_INVALID_CONFIG", what, nthreads, bt2_strerror(rc));
-        CHECK(g_logged_nthreads, "%s refused nthreads=%d without logging a "
-              "message naming nthreads", what, nthreads);
+        CHECK_MSG(rc == BT2_ERR_INVALID_CONFIG, "%s with nthreads=%d returned %s, "
+                  "not BT2_ERR_INVALID_CONFIG", what, nthreads, bt2_strerror(rc));
+        CHECK_MSG(g_logged_nthreads, "%s refused nthreads=%d without logging a "
+                  "message naming nthreads", what, nthreads);
     }
 }
 

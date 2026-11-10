@@ -630,11 +630,14 @@ class OutFileBuf {
 public:
 
 	/**
-	 * Open a new output stream to a file with given name.
+	 * Open a new output stream to a file with given name. With async
+	 * false no writer thread is started, and flush() writes on the
+	 * calling thread.
 	 */
-	OutFileBuf(const std::string& out, bool binary = false) :
+	OutFileBuf(const std::string& out, bool binary = false, bool async = true) :
 		name_(out.c_str()), out_(NULL), cur_(0), closed_(false),
-		asyncData_(out_), asynct_(writeAsync, &asyncData_),
+		asyncData_(out_),
+		asynct_(async ? std::thread(writeAsync, &asyncData_) : std::thread()),
 		buf1_(new char[BUF_SZ]), buf2_(new char[BUF_SZ]), cap1_(BUF_SZ), cap2_(BUF_SZ),
 		buf_(buf1_), cap_(cap1_)
 	{
@@ -668,11 +671,13 @@ public:
 	}
 
 	/**
-	 * Open a new output stream to standard out.
+	 * Open a new output stream to standard out. With async false no writer
+	 * thread is started.
 	 */
-	OutFileBuf() :
+	explicit OutFileBuf(bool async = true) :
 		name_("cout"), out_(stdout), cur_(0), closed_(false),
-		asyncData_(out_), asynct_(writeAsync, &asyncData_),
+		asyncData_(out_),
+		asynct_(async ? std::thread(writeAsync, &asyncData_) : std::thread()),
 		buf1_(new char[BUF_SZ]), buf2_(new char[BUF_SZ]), cap1_(BUF_SZ), cap2_(BUF_SZ),
 		buf_(buf1_), cap_(cap1_) {}
 	
@@ -680,7 +685,9 @@ public:
 	 * Close buffer when object is destroyed.
 	 */
 	~OutFileBuf() {
-		close();
+		/* close() rethrows a failed write, which must not leave a
+		   destructor; it is still in async_exception, logged below. */
+		try { close(); } catch(...) {}
 		asyncData_.notifyAbort();
 		if(asynct_.joinable()) asynct_.join();
 		/* Propagate async thread errors — but not in destructor
@@ -785,11 +792,13 @@ public:
 		if(closed_) return;
 		if(cur_ > 0) flush();
 		asyncData_.waitIdle();
-		asyncData_.checkAsyncError(); /* propagate async thread errors */
 		closed_ = true;
 		if(out_ != stdout) {
 			fclose(out_);
 		}
+		/* propagate async thread errors, with the file closed so a second
+		   close() (the destructor's) neither rethrows nor leaks it */
+		asyncData_.checkAsyncError();
 	}
 
 	/**

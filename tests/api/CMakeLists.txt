@@ -75,6 +75,13 @@ add_api_test(test_align_inline)
 # one thread and at two
 add_api_test(test_error_read_parse)
 
+# OutFileBuf without a writer thread reports a failed write (a C++ unit test)
+add_executable(test_outfilebuf_sync test_outfilebuf_sync.cpp)
+target_link_libraries(test_outfilebuf_sync bowtie2-align-s-lib)
+add_test(NAME api-test_outfilebuf_sync
+  COMMAND test_outfilebuf_sync
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
 # Phase 6 tests — index builder API (link against build library)
 macro(add_build_api_test name)
   add_executable(${name} ${name}.c)

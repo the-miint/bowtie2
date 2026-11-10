@@ -11,12 +11,9 @@
  * Run from PROJECT_SOURCE_DIR, where the example index lives.
  */
 #include "bt2_api.h"
+#include "test_helpers.h"
 #include <stdio.h>
 #include <string.h>
-
-#ifndef __EMSCRIPTEN__
-#include <dirent.h>
-#endif
 
 #define INDEX  "example/index/lambda_virus"
 #define READS  "tests/api/data/inline_reads.fq"
@@ -24,23 +21,6 @@
 
 static const char *NAMES[] = { "lambda_1001" };
 static const char *SEQS[]  = { "GCAGCGCAACACCCTTATCTGGTTGCCGACGGATGGTGATG" };
-
-/* Open descriptors in this process, or -1 if they can't be counted. */
-static int count_fds(void) {
-#ifdef __EMSCRIPTEN__
-    return -1;
-#else
-    DIR *d = opendir("/dev/fd");
-    if (d == NULL) return -1;
-    int n = 0;
-    struct dirent *e;
-    while ((e = readdir(d)) != NULL) {
-        if (e->d_name[0] != '.') n++;
-    }
-    closedir(d);
-    return n;
-#endif
-}
 
 static int run_once(bt2_align_ctx_t *ctx, int in_memory) {
     bt2_align_output_t *out = NULL;
@@ -81,11 +61,11 @@ static int check(int memory_mapped, int in_memory) {
     }
     int failures = 0;
     if (run_once(ctx, in_memory) != BT2_OK) failures++;
-    int before = count_fds();
+    int before = count_open_fds();
     for (int i = 0; failures == 0 && i < N_RUNS; i++) {
         if (run_once(ctx, in_memory) != BT2_OK) failures++;
     }
-    int after = count_fds();
+    int after = count_open_fds();
     bt2_align_destroy(ctx);
 
     if (failures == 0 && after != before) {
@@ -101,7 +81,7 @@ static int check(int memory_mapped, int in_memory) {
 }
 
 int main(void) {
-    if (count_fds() < 0) {
+    if (count_open_fds() < 0) {
         printf("test_fd_no_leak: SKIP (no /dev/fd of this process; in "
                "WebAssembly it is the host's)\n");
         return 0;
