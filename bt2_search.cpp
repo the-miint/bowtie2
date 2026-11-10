@@ -4655,10 +4655,11 @@ static void multiseedSearchWorker_2p5(void *vp) {
 
 /**
  * Thread entry for a search worker. An exception thrown on a thread ends the
- * process (std::terminate), so an input error the worker throws is kept
- * here instead: the first one, for multiseedSearch to rethrow once every
- * worker is done. The reader then reports the end of the input, so the other
- * workers stop, and this worker counts itself done, as it would have.
+ * process (std::terminate), so whatever the worker throws (an input error,
+ * or bad_alloc) is kept here instead: the first one, for multiseedSearch to
+ * rethrow once every worker is done. The reader then reports the end of the
+ * input, so the other workers stop, and this worker counts itself done, as it
+ * would have.
  */
 static void multiseedSearchWorkerThread(void (*worker)(void*), void *vp) {
 	try {
@@ -5000,9 +5001,9 @@ static void multiseedSearch(
 			del_pid(thread_stealing_dir.c_str(), pid);
 		}
 #endif
-		// An input error a worker thread or the reader thread threw is
-		// rethrown here, on the calling thread, where driver()'s caller
-		// catches it.
+		// What a worker thread or the reader thread threw (an input error,
+		// say) is rethrown here, on the calling thread, where driver()'s
+		// caller catches it.
 		std::exception_ptr error;
 		{
 			std::lock_guard<std::mutex> lk(multiseed_error_mutex);
@@ -5064,8 +5065,9 @@ static void driver(
 	if(gVerbose || startVerbose) {
 		cerr << "Creating PatternSource: "; logTime(cerr, true);
 	}
-	// What driver() makes is owned through unique_ptr, so a throw out of the
-	// search (an input error) frees it.
+	// What driver() makes for itself is owned through unique_ptr, so a throw
+	// out of the search frees it. The columnar sink it makes for the API
+	// (g_api_sink) is the API's to free.
 	PatternComposer *patsrc;
 	unique_ptr<PatternComposer> patsrc_owner; // set when driver() makes patsrc
 	if(api_patsrc != NULL) {
@@ -5400,7 +5402,7 @@ void apply_config_to_statics(const bt2_align_config_t *config,
 
 	// Threads
 	char threads_buf[32];
-	snprintf(threads_buf, sizeof(threads_buf), "%d", config->nthreads > 0 ? config->nthreads : 1);
+	snprintf(threads_buf, sizeof(threads_buf), "%d", config->nthreads); // >= 1: bt2_align_create checks
 	argv.push_back("-p");
 	argv.push_back(threads_buf);
 

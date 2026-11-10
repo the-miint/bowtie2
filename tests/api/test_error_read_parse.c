@@ -11,13 +11,13 @@
  *     the reader finds;
  *   - bt2_align_run with a good read, then one whose quality string is
  *     shorter than its sequence, which the parser of the second read finds.
- * Each must return an error with a message. The test repeats both and checks
- * that the number of open file descriptors (/dev/fd; not counted in
- * WebAssembly, where it is the host's) does not grow: a failed run must close
- * the read files and the output file it opened. Then it aligns on the same
- * context.
+ * Each must return BT2_ERR_INTERNAL with a message, and the parser's own
+ * message, which names the problem, must reach log_fn: so the run failed on
+ * the error under test and not on something else. The test repeats both and
+ * checks that the number of open file descriptors does not grow (a failed
+ * run must close the read files and the output file it opened), then aligns
+ * on the same context.
  *
- * Explicit checks rather than assert(), so the test checks in any build.
  * Run from PROJECT_SOURCE_DIR, where the example index lives.
  */
 #include "bt2_api.h"
@@ -25,32 +25,51 @@
 #include <stdio.h>
 #include <string.h>
 
-/* A WebAssembly build without pthreads aligns at one thread only. */
-#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
-#define MAX_THREADS 1
-#else
-#define MAX_THREADS 2
-#endif
-
 #define INDEX   "example/index/lambda_virus"
 #define MATES_1 "tests/api/data/inline_reads.fq"
 #define MATES_2 "tests/api/data/one_read.fq"
 #define N_RUNS  20
 
+/* The parser's messages (pat.cpp) for the two errors. */
+#define MATES_MSG "fewer reads in file specified with -2"
+#define QUALS_MSG "Read short_qual has more read characters than quality values"
+
 static int g_failures = 0;
+
+/* Set when log_fn gets the message the current run should produce. log_fn
+   is called one line at a time, under the library's lock. */
+static const char *g_want_msg;
+static int g_saw_msg;
+
+static void log_fn(void *user_data, int level, const char *msg) {
+    (void)user_data;
+    (void)level;
+    if (g_want_msg != NULL && strstr(msg, g_want_msg) != NULL) g_saw_msg = 1;
+}
+
+static void expect_failure(const char *what, int nthreads, int rc,
+                           bt2_align_ctx_t *ctx, bt2_align_output_t *out,
+                           const char *want_msg) {
+    CHECK_MSG(rc == BT2_ERR_INTERNAL, "[%d thread(s)] %s returned %s, not "
+              "BT2_ERR_INTERNAL", nthreads, what, bt2_strerror(rc));
+    CHECK_MSG(out == NULL, "[%d thread(s)] %s failed but set an output",
+              nthreads, what);
+    const char *msg = bt2_align_last_error(ctx);
+    CHECK_MSG(msg != NULL && msg[0] != '\0', "[%d thread(s)] %s failed with no "
+              "message", nthreads, what);
+    CHECK_MSG(g_saw_msg, "[%d thread(s)] %s failed, but log_fn never got the "
+              "parser's \"%s\"", nthreads, what, want_msg);
+}
 
 static void fail_files(bt2_align_ctx_t *ctx, int nthreads) {
     const char *m1[] = { MATES_1 };
     const char *m2[] = { MATES_2 };
     bt2_align_output_t *out = NULL;
+    g_want_msg = MATES_MSG;
+    g_saw_msg = 0;
     int rc = bt2_align_run_files(ctx, m1, 1, m2, 1, &out, NULL);
-    CHECK_MSG(rc != BT2_OK, "[%d thread(s)] run_files with mismatched mates "
-              "returned BT2_OK", nthreads);
-    CHECK_MSG(out == NULL, "[%d thread(s)] run_files failed but set an output",
-              nthreads);
-    const char *msg = bt2_align_last_error(ctx);
-    CHECK_MSG(msg != NULL && msg[0] != '\0', "[%d thread(s)] run_files failed "
-              "with no message", nthreads);
+    expect_failure("run_files with mismatched mates", nthreads, rc, ctx, out,
+                   MATES_MSG);
     bt2_align_output_free(out);
 }
 
@@ -66,13 +85,11 @@ static void fail_memory(bt2_align_ctx_t *ctx, int nthreads) {
     input.quals = quals;
     input.n_reads = 2;
     bt2_align_output_t *out = NULL;
+    g_want_msg = QUALS_MSG;
+    g_saw_msg = 0;
     int rc = bt2_align_run(ctx, &input, &out, NULL);
-    CHECK_MSG(rc != BT2_OK, "[%d thread(s)] run with a short quality string "
-              "returned BT2_OK", nthreads);
-    CHECK_MSG(out == NULL, "[%d thread(s)] run failed but set an output", nthreads);
-    const char *msg = bt2_align_last_error(ctx);
-    CHECK_MSG(msg != NULL && msg[0] != '\0', "[%d thread(s)] run failed with no "
-              "message", nthreads);
+    expect_failure("run with a short quality string", nthreads, rc, ctx, out,
+                   QUALS_MSG);
     bt2_align_output_free(out);
 }
 
@@ -81,12 +98,13 @@ static void check_threads(int nthreads) {
     bt2_align_config_init(&config);
     config.index_path = INDEX;
     config.nthreads = nthreads;
-    config.quiet = 1;
+    config.log_fn = log_fn;
 
     int err = BT2_OK;
     bt2_align_ctx_t *ctx = bt2_align_create(&config, &err);
     if (ctx == NULL) {
-        CHECK_MSG(0, "[%d thread(s)] bt2_align_create: %s", nthreads, bt2_strerror(err));
+        CHECK_MSG(0, "[%d thread(s)] bt2_align_create: %s", nthreads,
+                  bt2_strerror(err));
         return;
     }
 
@@ -107,17 +125,12 @@ static void check_threads(int nthreads) {
     /* The context still aligns. */
     const char *inputs[] = { MATES_1 };
     bt2_align_output_t *out = NULL;
+    g_want_msg = NULL;
     int rc = bt2_align_run_files(ctx, inputs, 1, NULL, 0, &out, NULL);
     CHECK_MSG(rc == BT2_OK, "[%d thread(s)] run_files after the failures: %s: %s",
               nthreads, bt2_strerror(rc), bt2_align_last_error(ctx));
-    int aligned = 0;
-    for (size_t i = 0; out != NULL && i < out->n_records; i++) {
-        if (strcmp(out->qname[i], "lambda_1001") == 0 && !(out->flag[i] & 0x4)) {
-            aligned = 1;
-        }
-    }
-    CHECK_MSG(aligned, "[%d thread(s)] lambda_1001 did not align after the failures",
-              nthreads);
+    CHECK_MSG(aligned_by_name(out, "lambda_1001"), "[%d thread(s)] lambda_1001 "
+              "did not align after the failures", nthreads);
     bt2_align_output_free(out);
     bt2_align_destroy(ctx);
     printf("test_error_read_parse[%d thread(s)]: open fds %d before, %d after "
@@ -125,7 +138,8 @@ static void check_threads(int nthreads) {
 }
 
 int main(void) {
-    for (int nthreads = 1; nthreads <= MAX_THREADS; nthreads++) {
+    int max_threads = TEST_HAS_THREADS ? 2 : 1;
+    for (int nthreads = 1; nthreads <= max_threads; nthreads++) {
         check_threads(nthreads);
     }
     if (g_failures != 0) {

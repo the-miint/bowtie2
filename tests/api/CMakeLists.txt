@@ -16,6 +16,8 @@ macro(add_api_test name)
   add_test(NAME api-${name}
     COMMAND ${name}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  # A test that cannot run here exits 77 (TEST_SKIP in test_helpers.h)
+  set_tests_properties(api-${name} PROPERTIES SKIP_RETURN_CODE 77)
 endmacro()
 
 # Phase 0 tests
@@ -81,6 +83,7 @@ target_link_libraries(test_outfilebuf_sync bowtie2-align-s-lib)
 add_test(NAME api-test_outfilebuf_sync
   COMMAND test_outfilebuf_sync
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_tests_properties(api-test_outfilebuf_sync PROPERTIES SKIP_RETURN_CODE 77)
 
 # Phase 6 tests — index builder API (link against build library)
 macro(add_build_api_test name)
@@ -92,6 +95,8 @@ macro(add_build_api_test name)
   add_test(NAME api-${name}
     COMMAND ${name}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  # A test that cannot run here exits 77 (TEST_SKIP in test_helpers.h)
+  set_tests_properties(api-${name} PROPERTIES SKIP_RETURN_CODE 77)
 endmacro()
 
 add_build_api_test(test_build_header)

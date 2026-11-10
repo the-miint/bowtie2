@@ -61,8 +61,9 @@ BitPairReference::BitPairReference(
 		loaded_ = false;
 		return;
 	}
-	// Each file is closed however the constructor exits. A mapping made from
-	// f4 outlives its FILE; the copy path below reads .4 through its own.
+	// f3 and f4 are closed however the constructor exits. A mapping made from
+	// f4 outlives its FILE; the copy path below reads .4 through a FILE of its
+	// own, which it closes on success.
 	unique_ptr<FILE, int (*)(FILE*)> f3_closer(f3, fclose);
     if((f4 = fopen(s4.c_str(), "rb"))  == NULL) {
         cerr << "Could not open reference-string index file " << s4 << " for reading." << endl;

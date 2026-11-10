@@ -82,9 +82,9 @@ static int check(int memory_mapped, int in_memory) {
 
 int main(void) {
     if (count_open_fds() < 0) {
-        printf("test_fd_no_leak: SKIP (no /dev/fd of this process; in "
-               "WebAssembly it is the host's)\n");
-        return 0;
+        printf("test_fd_no_leak: SKIP (open descriptors not countable here; in "
+               "WebAssembly /dev/fd is the host's)\n");
+        return TEST_SKIP;
     }
     int failures = check(0, 0) + check(0, 1) + check(1, 0) + check(1, 1);
     if (failures != 0) {

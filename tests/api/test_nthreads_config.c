@@ -1,26 +1,19 @@
 /*
  * bt2_align_create and bt2_build_create check nthreads:
- *   - below 1 is refused with BT2_ERR_INVALID_CONFIG (the builder would
- *     otherwise dereference NULL when it runs);
+ *   - below 1 is refused with BT2_ERR_INVALID_CONFIG (at 0 the builder
+ *     would divide by zero when it runs);
  *   - above 1 is refused the same way in a WebAssembly build without
  *     pthreads, which cannot start a thread, and accepted elsewhere;
  *   - 1 is accepted everywhere.
  * A refusal is logged through log_fn, naming nthreads.
  *
- * Only the contexts are created; nothing is aligned or built. Explicit
- * checks rather than assert(), so the test checks in any build. Run from
+ * Only the contexts are created; nothing is aligned or built. Run from
  * PROJECT_SOURCE_DIR, where the example index and reference live.
  */
 #include "bt2_api.h"
 #include "test_helpers.h"
 #include <stdio.h>
 #include <string.h>
-
-#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
-#define THREADS_AVAILABLE 0
-#else
-#define THREADS_AVAILABLE 1
-#endif
 
 #define INDEX "example/index/lambda_virus"
 #define REF   "example/reference/lambda_virus.fa"
@@ -91,13 +84,13 @@ int main(void) {
         expect(apis[i].what, 0, apis[i].try_create, 0);
         expect(apis[i].what, -1, apis[i].try_create, 0);
         expect(apis[i].what, 1, apis[i].try_create, 1);
-        expect(apis[i].what, 2, apis[i].try_create, THREADS_AVAILABLE);
+        expect(apis[i].what, 2, apis[i].try_create, TEST_HAS_THREADS);
     }
     if (g_failures != 0) {
         fprintf(stderr, "test_nthreads_config: %d check(s) failed\n", g_failures);
         return 1;
     }
     printf("test_nthreads_config: PASSED (threads %savailable)\n",
-           THREADS_AVAILABLE ? "" : "not ");
+           TEST_HAS_THREADS ? "" : "not ");
     return 0;
 }

@@ -13,8 +13,9 @@
  * per process, where process exit masks it).
  *
  * Linux-only: it reads /proc/self/maps. On platforms without it the test
- * skips (passes). It skips in WebAssembly too: a /proc/self/maps the module
- * can open there is the host's, not its own.
+ * skips (exit 77, which ctest reports as skipped). It skips in WebAssembly
+ * too: a /proc/self/maps the module can open there is the host's, not its
+ * own.
  */
 #include "bt2_api.h"
 #include <stdio.h>
@@ -40,11 +41,11 @@ static int count_index_vmas(void) {
 int main(void) {
 #ifdef __EMSCRIPTEN__
     printf("test_mm_no_vma_leak: SKIP (WebAssembly: /proc/self/maps is the host's)\n");
-    return 0;
+    return 77; /* skipped (SKIP_RETURN_CODE) */
 #endif
     if (count_index_vmas() < 0) {
         printf("test_mm_no_vma_leak: SKIP (no /proc/self/maps; non-Linux)\n");
-        return 0;
+        return 77; /* skipped (SKIP_RETURN_CODE) */
     }
 
     bt2_align_config_t config;

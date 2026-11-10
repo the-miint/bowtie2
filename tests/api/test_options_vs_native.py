@@ -392,10 +392,9 @@ def main():
     cpu_cap = min(4, (os.cpu_count() or 2))
     workers = 2 if "TSAN_OPTIONS" in os.environ else cpu_cap
 
-    # BT2_FAST_SUBSET runs a 6-case smoke set covering reporting, scoring,
-    # paired-end, memory-path translation and the API's threads. Used by the
-    # TSan CI job, where the full sweep is prohibitively slow; the two
-    # threads cases are the ones that start threads in the API.
+    # BT2_FAST_SUBSET runs only the cases SUBSET_LABELS names. Used by the
+    # TSan CI job, where the full sweep is prohibitively slow; its threads=2
+    # cases are the ones that start threads in the API.
     if os.environ.get("BT2_FAST_SUBSET"):
         cases = [c for c in CASES if c[1] in SUBSET_LABELS]
         missing = SUBSET_LABELS - {c[1] for c in cases}

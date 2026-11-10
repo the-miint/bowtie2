@@ -20,6 +20,7 @@
  * catch any divergence wholesale if XN ever appeared.
  */
 #include "bt2_api.h"
+#include "test_helpers.h"
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
@@ -114,6 +115,11 @@ static void check_single_end(void) {
     }
     assert(saw_aligned);
     assert(saw_unaligned);
+    /* Each read maps, or not, as its comment above says. */
+    assert(aligned_by_name(output, "aligned_1"));
+    assert(aligned_by_name(output, "aligned_2"));
+    assert(aligned_by_name(output, "aligned_3"));
+    assert(!aligned_by_name(output, "polya_unaligned"));
 
     bt2_align_output_free(output);
     bt2_align_destroy(ctx);

@@ -141,8 +141,10 @@ cannot start a thread, so it runs at `nthreads = 1` only: alignment then runs
 on the calling thread (see [Threads](#threads)), and `bt2_align_create` and
 `bt2_build_create` refuse any other `nthreads` with `BT2_ERR_INVALID_CONFIG`.
 
-The `wasm` job of `.github/workflows/api-tests.yml` builds every target this
-way with emsdk 6.0.9 and runs every C API test under node:
+The `wasm` job of `.github/workflows/api-tests.yml` is the reference for this
+build. It builds every target with emsdk 6.0.9 and runs every C API test under
+node; ctest reports as skipped the ones that need what the module cannot see
+of its own (`/dev/fd`, `/dev/full`, `/proc/self/maps`):
 
 ```bash
 embuilder build zlib        # FindZLIB looks for the port when cmake runs
@@ -151,7 +153,7 @@ LF="-fwasm-exceptions -sUSE_ZLIB=1 -sNODERAWFS=1 -sSTACK_SIZE=8MB -sALLOW_MEMORY
 emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release -DBOWTIE_MM=OFF \
     -DCMAKE_C_FLAGS="$CF" -DCMAKE_CXX_FLAGS="$CF" -DCMAKE_EXE_LINKER_FLAGS="$LF"
 cmake --build build-wasm -j
-cd build-wasm && ctest -R '^api-test_'   # node runs each .js from the source root
+cd build-wasm && ctest -R '^api-test_'   # each .js under node, from the source root
 ```
 
 - `-fwasm-exceptions` is required: bowtie2 reports errors by throwing, and
@@ -579,10 +581,11 @@ if (rc != BT2_OK) {
 The library never calls `exit()` or `abort()`. All errors are returned as
 error codes. A corrupt index returns `BT2_ERR_INDEX`, not a crash.
 
-This holds at any `nthreads`. A read bowtie2's parser rejects (mate files
+This holds at any `nthreads`. Input bowtie2's reader rejects (mate files
 with different read counts, a quality string shorter than its sequence)
-returns `BT2_ERR_INTERNAL`, whichever thread parsed it; the parser's message,
-which names the read, goes to `log_fn`. The run's other reads are not
+fails the run with `BT2_ERR_INTERNAL`, whichever thread read it; bowtie2's
+message, which names the problem, goes to `log_fn` (at the level its prefix
+gives: see [Log Levels](#log-levels)). The run's other reads are not
 returned.
 
 `bt2_align_create` and `bt2_build_create` have no context to hold a message
@@ -622,10 +625,11 @@ Level detection is best-effort based on message prefix (`"Error:"`,
 - **`log_fn` NULL, `quiet` = 0:** Output goes to stderr/stdout as normal
   (same as the native bowtie2 binary).
 
-`log_fn` is called on the thread that wrote the line, one call at a time.
-At `nthreads = 1` that is always the thread that called the API; at
-`nthreads > 1` a worker's warnings (e.g. a read too short to align) arrive on
-that worker's thread.
+`log_fn` is called one call at a time, on the thread that wrote the line's
+last character. At `nthreads = 1` that is always the thread that called the
+API. At `nthreads > 1` a worker's warnings (e.g. a read too short to align)
+arrive on that worker's thread, and lines two threads write at once can come
+mixed in one call.
 
 ### Example
 
@@ -673,17 +677,17 @@ What a run starts, by `nthreads`:
 
 | Call | `nthreads = 1` | `nthreads = N > 1` |
 |------|----------------|--------------------|
-| `bt2_align_run`, `bt2_align_run_files` | No thread: the worker, the read-ahead reader and the output writer run on the calling thread | N workers, one read-ahead reader and one output writer; every worker has finished, and the reader and writer are joined, before the call returns |
+| `bt2_align_run`, `bt2_align_run_files` | No thread: the worker, the read-ahead reader and the output writer run on the calling thread | N workers, one read-ahead reader and one output writer; every worker has finished its reads, and the reader and writer are joined, before the call returns |
 | `bt2_build_run` | No thread | Worker threads for index construction |
 
 At one thread the read parsing the reader thread would overlap with the
-search runs in line with it, so a run can be a few percent slower; the
-results are the same. The native `bowtie2` binary keeps its threads at any
-`-p`.
+search runs in line with it, so a run can be a few percent slower (on the
+example reads, five runs each: 2.6% and 3.4% single-end from files and from
+memory, within noise paired-end); the results are the same. The native
+`bowtie2` binary keeps its threads at any `-p`.
 
 `bt2_align_run` and `bt2_align_run_files` block `SIGPIPE` on the calling
-thread (`pthread_sigmask`) and leave it blocked, as the native binary does
-before it starts its threads.
+thread (`pthread_sigmask`) and leave it blocked.
 
 ---
 

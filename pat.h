@@ -1350,9 +1350,7 @@ public:
 		asynct_(async ? std::thread(readAsync, this) : std::thread()) {}
 
 	~PatternSourceReadAheadFactory() {
-		if(!asynct_.joinable()) return; // no reader thread to stop
-		returnUnready(NULL); // this will signal asynct_ it is time to quit
-		asynct_.join();
+		finish();
 	}
 
 	// From now on the reader thread reports the end of the input instead of
@@ -1382,11 +1380,7 @@ public:
 			ReadElement re;
 			re.ps = psq_idle_.pop();
 			try {
-				if (re.ps->nextReadPairReady()) {
-					re.readResult = make_pair(true, false);
-				} else {
-					re.readResult = re.ps->nextReadPair();
-				}
+				re.readResult = readNext(re.ps);
 			} catch(...) {
 				returnUnready(re.ps); // the idle queue owns it
 				throw;
@@ -1585,24 +1579,30 @@ private:
 			) {}
 	};
 
+	// The read the reader thread does for a worker, into ps.
+	static std::pair<bool, bool> readNext(PatternSourcePerThread *ps) {
+		if (ps->nextReadPairReady()) {
+			// Should never get in here, but just in case
+			return make_pair(true, false);
+		}
+		return ps->nextReadPair();
+	}
+
         static void readAsync(PatternSourceReadAheadFactory *obj) {
 		LockedREQueue &psq_ready = obj->psq_ready_;
 		LockedPSQueue &psq_idle = obj->psq_idle_;
                 while(true) {
 			ReadElement re;
 			re.ps = psq_idle.pop();
-			if (re.ps==NULL) break; // the destructor added this in the queue
+			if (re.ps==NULL) break; // finish() added this to the queue
 
 			if (obj->read_error_ || obj->stopped_) {
 				// A read threw, or a worker did: report the end of the
 				// input, so every worker stops.
 				re.readResult = make_pair(false, true);
-			} else if (re.ps->nextReadPairReady()) {
-				// Should never get in here, but just in case
-				re.readResult = make_pair(true, false);
 			} else {
 				try {
-					re.readResult = re.ps->nextReadPair();
+					re.readResult = readNext(re.ps);
 				} catch(...) {
 					// Thrown on this thread it would end the process: keep
 					// it for finish() to return.
@@ -1617,7 +1617,7 @@ private:
 	PatternSourcePerThreadFactory psfact_;
 	LockedREQueue psq_ready_;
 	LockedPSQueue psq_idle_;
-	std::exception_ptr read_error_; // what a read on asynct_ threw; its own
+	std::exception_ptr read_error_; // what a read on asynct_ threw; only asynct_ writes it
 	std::atomic<bool> stopped_;
 	std::thread asynct_; // last: it starts in the constructor and uses the rest
 };

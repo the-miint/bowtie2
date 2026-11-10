@@ -8,8 +8,9 @@
  *   - Lines starting with "Warning:" -> BT2_LOG_WARN
  *   - All other lines -> BT2_LOG_INFO
  *
- * Thread safety: must be installed inside g_bowtie_mutex scope.
- * The API sets --quiet, so worker threads should not write to cerr.
+ * Thread safety: must be installed inside g_bowtie_mutex scope. Every
+ * thread writes through the same buffer, under its mutex, so at nthreads > 1
+ * the characters of lines two threads write at once can be mixed.
  */
 
 #ifndef BT2_LOG_STREAMBUF_H
@@ -26,8 +27,8 @@
 /**
  * Thread-safe streambuf that routes cerr (or cout) output to a bt2_log_fn
  * callback.
- * All overflow/sync calls are mutex-protected so worker threads that
- * write to cerr (e.g. on error conditions) do not cause data races.
+ * All overflow calls are mutex-protected so worker threads that write to
+ * cerr (e.g. on error conditions) do not cause data races.
  */
 class LogCallbackStreambuf : public std::streambuf {
 public:
@@ -54,11 +55,11 @@ protected:
 		return c;
 	}
 
+	/* std::cerr is unit-buffered, so it syncs after every <<. Delivering the
+	   partial line here would split one message into several calls; a line
+	   goes out at its '\n' (overflow), and what is left when the buffer is
+	   destroyed. */
 	int sync() override {
-		std::lock_guard<std::mutex> lock(mtx_);
-		if (!buffer_.empty()) {
-			flush_line();
-		}
 		return 0;
 	}
 
