@@ -13,6 +13,7 @@ pattern.
 
 - [Quick Start](#quick-start)
 - [Building](#building)
+  - [WebAssembly](#webassembly)
 - [Aligner API](#aligner-api)
   - [Configuration](#aligner-configuration)
   - [Context Lifecycle](#aligner-context-lifecycle)
@@ -27,6 +28,7 @@ pattern.
 - [Error Handling](#error-handling)
 - [Log Callback](#log-callback)
 - [Thread Safety](#thread-safety)
+  - [Threads](#threads)
 - [Memory Management](#memory-management)
 - [Complete Examples](#complete-examples)
 - [Linking](#linking)
@@ -89,7 +91,8 @@ bt2_align_destroy(actx);
 - C++11 compiler (GCC 4.8+, Clang 3.3+)
 - CMake 3.5+
 - zlib development headers
-- pthreads
+- pthreads (a WebAssembly build can do without them: see
+  [WebAssembly](#webassembly))
 
 ### Library Targets
 
@@ -127,6 +130,40 @@ ASan and TSan are mutually exclusive.
 ```bash
 cd build && ctest --output-on-failure
 ```
+
+The API tests (`tests/api`) are compiled with `NDEBUG` undefined, so their
+`assert()`s check in every build type; the libraries keep their flags.
+
+### WebAssembly
+
+The libraries build for wasm32 with Emscripten. Without pthreads the build
+cannot start a thread, so it runs at `nthreads = 1` only: alignment then runs
+on the calling thread (see [Threads](#threads)), and `bt2_align_create` and
+`bt2_build_create` refuse any other `nthreads` with `BT2_ERR_INVALID_CONFIG`.
+
+The `wasm` job of `.github/workflows/api-tests.yml` builds every target this
+way with emsdk 6.0.9 and runs every C API test under node:
+
+```bash
+embuilder build zlib        # FindZLIB looks for the port when cmake runs
+CF="-fwasm-exceptions -msse2 -msimd128 -sUSE_ZLIB=1"
+LF="-fwasm-exceptions -sUSE_ZLIB=1 -sNODERAWFS=1 -sSTACK_SIZE=8MB -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=1"
+emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release -DBOWTIE_MM=OFF \
+    -DCMAKE_C_FLAGS="$CF" -DCMAKE_CXX_FLAGS="$CF" -DCMAKE_EXE_LINKER_FLAGS="$LF"
+cmake --build build-wasm -j
+cd build-wasm && ctest -R '^api-test_'   # node runs each .js from the source root
+```
+
+- `-fwasm-exceptions` is required: bowtie2 reports errors by throwing, and
+  the API catches them.
+- `-msse2 -msimd128` lets the SSE code compile to WebAssembly SIMD.
+- `-sNODERAWFS=1` gives the tests node's file system, so they find
+  `example/` as they do natively. A host that loads indexes another way does
+  not need it.
+- `BOWTIE_MM=OFF`: the lane builds without memory-mapped index loading, so
+  `memory_mapped = 1` fails there (the option parser refuses `--mm`).
+- The Python tests (`api-test-*`) compare the API with the native CLI, so
+  they run in the native lanes only.
 
 ---
 
@@ -174,7 +211,7 @@ String fields with default `NULL` mean "not set".
 |-------|---------|-----|-------|
 | `index_path` | NULL (required) | `-x` | Basename of a bowtie2 index |
 | `seed` | 0 | `--seed` | Must be 0-2147483647 |
-| `nthreads` | 1 | `-p` | Alignment worker threads |
+| `nthreads` | 1 | `-p` | Alignment worker threads. At 1, alignment runs on the calling thread (see [Threads](#threads)). Below 1, or above 1 in a WebAssembly build without pthreads, `bt2_align_create` returns `BT2_ERR_INVALID_CONFIG` |
 | `preset` | `BT2_PRESET_SENSITIVE` | see Presets | Sensitivity/speed tradeoff |
 | `local_align` | 0 | `--local` | 0 = end-to-end, nonzero = local |
 | `quiet` | 1 | `--quiet` | Suppresses output when `log_fn` is NULL |
@@ -452,7 +489,7 @@ Always call `bt2_build_config_init(&config)` before setting fields.
 | `ref_paths` | Yes | NULL | Array of FASTA file paths. Supports `.gz` and `.zst` compression. |
 | `n_ref_paths` | Yes | 0 | Must be >= 1. |
 | `output_base` | Yes | NULL | Index files written as `<base>.1.bt2`, `<base>.2.bt2`, etc. |
-| `nthreads` | No | 1 | Threads for index construction. |
+| `nthreads` | No | 1 | Threads for index construction. At 1 the build starts no thread. Below 1, or above 1 in a WebAssembly build without pthreads, `bt2_build_create` returns `BT2_ERR_INVALID_CONFIG`. |
 | `seed` | No | 0 | Must be 0-2147483647. |
 | `offrate` | No | 4 | Suffix array sampling rate. Lower = larger index, faster alignment. |
 | `packed` | No | 0 | Nonzero uses 2-bit packed encoding (half the RAM, slower build). |
@@ -542,6 +579,16 @@ if (rc != BT2_OK) {
 The library never calls `exit()` or `abort()`. All errors are returned as
 error codes. A corrupt index returns `BT2_ERR_INDEX`, not a crash.
 
+This holds at any `nthreads`. A read bowtie2's parser rejects (mate files
+with different read counts, a quality string shorter than its sequence)
+returns `BT2_ERR_INTERNAL`, whichever thread parsed it; the parser's message,
+which names the read, goes to `log_fn`. The run's other reads are not
+returned.
+
+`bt2_align_create` and `bt2_build_create` have no context to hold a message
+when they refuse a config. For an unusable `nthreads` they log the reason
+through the config's `log_fn` at `BT2_LOG_ERROR`, if one is set.
+
 ---
 
 ## Log Callback
@@ -574,6 +621,11 @@ Level detection is best-effort based on message prefix (`"Error:"`,
   is suppressed.
 - **`log_fn` NULL, `quiet` = 0:** Output goes to stderr/stdout as normal
   (same as the native bowtie2 binary).
+
+`log_fn` is called on the thread that wrote the line, one call at a time.
+At `nthreads = 1` that is always the thread that called the API; at
+`nthreads > 1` a worker's warnings (e.g. a read too short to align) arrive on
+that worker's thread.
 
 ### Example
 
@@ -614,6 +666,24 @@ functions from any thread without external synchronization. However:
 - Calling `bt2_align_run` on the same context from two threads simultaneously.
 - Calling `bt2_align_destroy` while another thread is in `bt2_align_run`.
 - Calling any API function from within a `log_fn` callback.
+
+### Threads
+
+What a run starts, by `nthreads`:
+
+| Call | `nthreads = 1` | `nthreads = N > 1` |
+|------|----------------|--------------------|
+| `bt2_align_run`, `bt2_align_run_files` | No thread: the worker, the read-ahead reader and the output writer run on the calling thread | N workers, one read-ahead reader and one output writer; every worker has finished, and the reader and writer are joined, before the call returns |
+| `bt2_build_run` | No thread | Worker threads for index construction |
+
+At one thread the read parsing the reader thread would overlap with the
+search runs in line with it, so a run can be a few percent slower; the
+results are the same. The native `bowtie2` binary keeps its threads at any
+`-p`.
+
+`bt2_align_run` and `bt2_align_run_files` block `SIGPIPE` on the calling
+thread (`pthread_sigmask`) and leave it blocked, as the native binary does
+before it starts its threads.
 
 ---
 
