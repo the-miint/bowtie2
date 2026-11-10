@@ -130,10 +130,10 @@ jobs:
       - name: Run API tests under TSan
         env:
           TSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/tsan_suppressions.txt
-          # Skip the full 30-case option sweep under TSan — the per-process
-          # bowtie2 invocations don't exercise threading beyond what
-          # test_align_basic/paired already cover under TSan, and the full
-          # sweep takes >30 min under TSan instrumentation.
+          # Run the option sweep's smoke subset under TSan: the full sweep
+          # takes >30 min under TSan instrumentation. The subset includes the
+          # threads=2 cases, the ones that start threads in the API (at one
+          # thread it runs on the calling thread).
           BT2_FAST_SUBSET: "1"
         run: cd build && ctest -R api-test --output-on-failure --timeout 1800
 

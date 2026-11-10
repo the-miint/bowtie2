@@ -648,11 +648,14 @@ public:
 	}
 
 	/**
-	 * Open a new output stream to a file with given name.
+	 * Open a new output stream to a file with given name. With async
+	 * false no writer thread is started, and flush() writes on the
+	 * calling thread.
 	 */
-	OutFileBuf(const char *out, bool binary = false) :
+	OutFileBuf(const char *out, bool binary = false, bool async = true) :
 		name_(out), out_(NULL), cur_(0), closed_(false),
-		asyncData_(out_), asynct_(writeAsync, &asyncData_),
+		asyncData_(out_),
+		asynct_(async ? std::thread(writeAsync, &asyncData_) : std::thread()),
 		buf1_(new char[BUF_SZ]), buf2_(new char[BUF_SZ]), cap1_(BUF_SZ), cap2_(BUF_SZ),
 		buf_(buf1_), cap_(cap1_)
 	{
@@ -679,7 +682,7 @@ public:
 	~OutFileBuf() {
 		close();
 		asyncData_.notifyAbort();
-		asynct_.join();
+		if(asynct_.joinable()) asynct_.join();
 		/* Propagate async thread errors — but not in destructor
 		   (throwing from destructor is UB during stack unwind).
 		   Log and swallow instead. */
@@ -798,6 +801,10 @@ public:
 	}
 
 	void flush() {
+		if(!asynct_.joinable()) {
+			flushSync();
+			return;
+		}
 		// there still could have been an outstanding async write
 		asyncData_.waitIdle();
 		// start the async write
@@ -902,6 +909,36 @@ private:
 	void increaseBuffer(size_t delta) {
 		size_t newCap = cap_+delta;
 		resizeBuffer(newCap);
+	}
+
+	/**
+	 * flush() without a writer thread: write the buffer on the calling
+	 * thread. A failed write is kept in asyncData_, as the writer thread
+	 * keeps it, for close() to rethrow; writes after it are dropped.
+	 */
+	void flushSync() {
+		const char *ptr = buf_;
+		size_t remaining = cur_;
+		cur_ = 0;
+		if(asyncData_.epipe_occurred || asyncData_.async_exception) return;
+		while(remaining > 0) {
+			errno = 0;
+			size_t n = fwrite((const void *)ptr, 1, remaining, out_);
+			if(n < remaining && errno == EPIPE) {
+				asyncData_.epipe_occurred = true;
+				return;
+			}
+			if(n == 0 || feof(out_)) {
+				break;
+			}
+			ptr += n;
+			remaining -= n;
+		}
+		if(remaining != 0) {
+			perror("fwrite");
+			asyncData_.async_exception = std::make_exception_ptr(
+				std::runtime_error("fwrite failed writing output"));
+		}
 	}
 
 	class AsyncData {

@@ -13,7 +13,7 @@
  *   --nofw  --norc
  *   --seed-mm N  --seed-len N  --max-dp-fail N  --max-seed-rounds N
  *   --no-unal  --xeq  --rg-id STR
- *   --ignore-quals  --reorder  --local  --seed N
+ *   --ignore-quals  --reorder  --local  --seed N  --threads N
  *
  * Output: one TSV line per record:
  *   QNAME\tFLAG\tRNAME\tPOS\tMAPQ\tCIGAR\tRNEXT\tPNEXT\tTLEN\tSEQ\tQUAL\t
@@ -128,6 +128,8 @@ int main(int argc, char **argv) {
             config.local_align = 1;
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc)
             config.seed = atoll(argv[++i]);
+        else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc)
+            config.nthreads = atoi(argv[++i]);
         else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 1;

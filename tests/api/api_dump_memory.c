@@ -3,7 +3,8 @@
  * bt2_align_run() (in-memory API), and dumps results as TSV to stdout.
  * Output format matches api_dump for comparison.
  *
- * Usage: api_dump_memory <index> <reads.fq> [reads2.fq]
+ * Usage: api_dump_memory <index> <reads.fq> [reads2.fq] [options...]
+ * (the options are api_dump's)
  */
 #include "bt2_api.h"
 #include <stdio.h>
@@ -205,6 +206,8 @@ int main(int argc, char **argv) {
             config.local_align = 1;
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc)
             config.seed = atoll(argv[++i]);
+        else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc)
+            config.nthreads = atoi(argv[++i]);
         else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 1;

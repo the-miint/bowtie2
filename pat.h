@@ -1335,21 +1335,41 @@ public:
 		std::pair<bool, bool>   readResult;
 	};
 
+	// With async false no reader thread is started, and nextReadPair()
+	// reads on the calling thread.
 	PatternSourceReadAheadFactory(
 		PatternComposer& composer,
-		const PatternParams& pp, size_t n, bool useCV) :
+		const PatternParams& pp, size_t n, bool useCV, bool async = true) :
 		psfact_(composer,pp),
 		psq_ready_(useCV),
 		psq_idle_(useCV,psfact_,n),
-		asynct_(readAsync, this) {}
+		asynct_(async ? std::thread(readAsync, this) : std::thread()) {}
 
 	~PatternSourceReadAheadFactory() {
+		if(!asynct_.joinable()) return; // no reader thread to stop
 		returnUnready(NULL); // this will signal asynct_ it is time to quit
 		asynct_.join();
 	}
 
 	// wait for data, if none in the queue
 	ReadElement nextReadPair() {
+		if(!asynct_.joinable()) {
+			// No reader thread: read here, into the idle buffer the
+			// thread would take next, as readAsync does.
+			ReadElement re;
+			re.ps = psq_idle_.pop();
+			try {
+				if (re.ps->nextReadPairReady()) {
+					re.readResult = make_pair(true, false);
+				} else {
+					re.readResult = re.ps->nextReadPair();
+				}
+			} catch(...) {
+				returnUnready(re.ps); // the idle queue owns it
+				throw;
+			}
+			return re;
+		}
 		return psq_ready_.pop();
 	}
 

@@ -115,7 +115,10 @@ def parse_api_dump(text):
 
 def run_native(index, reads, reads2=None):
     """Run native bowtie2 and return parsed records."""
-    cmd = [NATIVE_BT2, "-x", index, "--quiet"]
+    # -p 1 so the default doesn't come from OMP_NUM_THREADS. The CLI runs its
+    # worker on a thread of its own; api_dump, at one thread, runs it on the
+    # calling thread. Their records must match.
+    cmd = [NATIVE_BT2, "-x", index, "--quiet", "-p", "1"]
     if reads2:
         cmd += ["-1", reads, "-2", reads2]
     else:

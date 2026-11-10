@@ -110,6 +110,19 @@ static int nthreads;      // number of pthreads operating concurrently
 static int thread_ceiling;// maximum number of threads user wants bowtie to use
 static string thread_stealing_dir; // keep track of pids in this directory
 static bool thread_stealing;// true iff thread stealing is in use
+
+// The C API at one thread runs the alignment worker, the read-ahead reader and
+// the output writer on the calling thread, starting no thread: a WebAssembly
+// build without pthreads cannot start one. The CLI runs each on a thread of
+// its own at any -p.
+static bool runInline() {
+#ifdef BT2_NO_MAIN
+	return nthreads == 1 && !thread_stealing;
+#else
+	return false;
+#endif
+}
+
 static int outType;       // style of output
 static bool noRefNames;   // true -> print reference indexes; not names
 static uint32_t lowseeds; // size of seed range above which a seed is considered low quality, and thus discarded (0 disables the cut)
@@ -4861,7 +4874,7 @@ static void multiseedSearch(
 	bool readahead_useCVLocks = nthreads<=16; // Note: We may want to consider other factors, too
 
 	// Important: Need at least nthreads+1 elements, more is OK
-	PatternSourceReadAheadFactory readahead_factory(patsrc,pp,4*nthreads+1,readahead_useCVLocks);
+	PatternSourceReadAheadFactory readahead_factory(patsrc,pp,4*nthreads+1,readahead_useCVLocks,!runInline());
 	multiseed_readahead_factory = &readahead_factory;
 
 	tps.resize(std::max(nthreads, thread_ceiling));
@@ -4918,6 +4931,16 @@ static void multiseedSearch(
 			tps[i].tid = i;
 			tps[i].done = &all_threads_done;
 
+			if(runInline()) {
+				// Run the one worker here; it counts itself done.
+				threads.push_back(NULL);
+				if(bowtie2p5) {
+					multiseedSearchWorker_2p5((void*)&tps[i]);
+				} else {
+					multiseedSearchWorker((void*)&tps[i]);
+				}
+				continue;
+			}
 			if(bowtie2p5) {
 				threads.push_back(new std::thread(multiseedSearchWorker_2p5, (void*)&tps[i]));
 			} else {
@@ -4999,11 +5022,12 @@ static void driver(
 	if(gVerbose || startVerbose) {
 		cerr << "Creating PatternSource: "; logTime(cerr, true);
 	}
+	// Owned through unique_ptr, so a throw out of the search (an input
+	// error, on the calling thread) frees what driver() made.
 	PatternComposer *patsrc;
-	bool patsrc_owned;
+	unique_ptr<PatternComposer> patsrc_owner; // set when driver() makes patsrc
 	if(api_patsrc != NULL) {
 		patsrc = api_patsrc;
-		patsrc_owned = false;
 	} else {
 		patsrc = PatternComposer::setupPatternComposer(
 			queries,     // singles, from argv
@@ -5018,18 +5042,15 @@ static void driver(
 #endif
 			pp,          // read read-in parameters
 			gVerbose || startVerbose); // be talkative
-		patsrc_owned = true;
+		patsrc_owner.reset(patsrc);
 	}
 	// Open hit output file
 	if(gVerbose || startVerbose) {
 		cerr << "Opening hit output file: "; logTime(cerr, true);
 	}
-	OutFileBuf *fout;
-	if(!outfile.empty()) {
-		fout = new OutFileBuf(outfile.c_str(), false);
-	} else {
-		fout = new OutFileBuf();
-	}
+	unique_ptr<OutFileBuf> fout(!outfile.empty() ?
+		new OutFileBuf(outfile.c_str(), false, !runInline()) :
+		new OutFileBuf());
 	// Initialize Ebwt object and read in header
 	if(gVerbose || startVerbose) {
 		cerr << "About to initialize fw Ebwt: "; logTime(cerr, true);
@@ -5286,16 +5307,12 @@ static void driver(
 		oq.flush(true);
 		assert_eq(oq.numStarted(), oq.numFinished());
 		assert_eq(oq.numStarted(), oq.numFlushed());
-		if(patsrc_owned) {
-			delete patsrc;
-		}
+		patsrc_owner.reset();
 		if(mssink_owned) {
 			delete mssink;
 		}
 		delete metricsOfb;
-		if(fout != NULL) {
-			delete fout;
-		}
+		fout.reset();
 	}
 }
 
