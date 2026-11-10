@@ -22,7 +22,11 @@
 static const char *NAMES[] = { "lambda_1001" };
 static const char *SEQS[]  = { "GCAGCGCAACACCCTTATCTGGTTGCCGACGGATGGTGATG" };
 
-static int run_once(bt2_align_ctx_t *ctx, int in_memory) {
+static int g_failures = 0;
+
+/* One run; whether it succeeded. */
+static int run_once(bt2_align_ctx_t *ctx, int in_memory, const char *label,
+                    int memory_mapped) {
     bt2_align_output_t *out = NULL;
     int rc;
     if (in_memory) {
@@ -36,16 +40,13 @@ static int run_once(bt2_align_ctx_t *ctx, int in_memory) {
         const char *inputs[] = { READS };
         rc = bt2_align_run_files(ctx, inputs, 1, NULL, 0, &out, NULL);
     }
-    if (rc != BT2_OK) {
-        fprintf(stderr, "FAIL: run: %s: %s\n", bt2_strerror(rc),
-                bt2_align_last_error(ctx));
-    }
+    CHECK_MSG(rc == BT2_OK, "[%s, mm=%d] run: %s: %s", label, memory_mapped,
+              bt2_strerror(rc), bt2_align_last_error(ctx));
     bt2_align_output_free(out);
-    return rc;
+    return rc == BT2_OK;
 }
 
-/* Returns the number of failed checks. */
-static int check(int memory_mapped, int in_memory) {
+static void check(int memory_mapped, int in_memory) {
     const char *label = in_memory ? "memory" : "files";
     bt2_align_config_t config;
     bt2_align_config_init(&config);
@@ -56,28 +57,23 @@ static int check(int memory_mapped, int in_memory) {
     int err = BT2_OK;
     bt2_align_ctx_t *ctx = bt2_align_create(&config, &err);
     if (ctx == NULL) {
-        fprintf(stderr, "FAIL: bt2_align_create: %s\n", bt2_strerror(err));
-        return 1;
+        CHECK_MSG(0, "[%s, mm=%d] bt2_align_create: %s", label, memory_mapped,
+                  bt2_strerror(err));
+        return;
     }
-    int failures = 0;
-    if (run_once(ctx, in_memory) != BT2_OK) failures++;
+    int ok = run_once(ctx, in_memory, label, memory_mapped);
     int before = count_open_fds();
-    for (int i = 0; failures == 0 && i < N_RUNS; i++) {
-        if (run_once(ctx, in_memory) != BT2_OK) failures++;
+    for (int i = 0; ok && i < N_RUNS; i++) {
+        ok = run_once(ctx, in_memory, label, memory_mapped);
     }
     int after = count_open_fds();
     bt2_align_destroy(ctx);
+    if (!ok) return;
 
-    if (failures == 0 && after != before) {
-        fprintf(stderr, "FAIL[%s, mm=%d]: open descriptors went from %d to %d "
-                        "over %d runs\n", label, memory_mapped, before, after, N_RUNS);
-        failures++;
-    }
-    if (failures == 0) {
-        printf("test_fd_no_leak[%s, mm=%d]: %d open descriptors before and after "
-               "%d runs\n", label, memory_mapped, before, N_RUNS);
-    }
-    return failures;
+    CHECK_MSG(after == before, "[%s, mm=%d] open descriptors went from %d to %d "
+              "over %d runs", label, memory_mapped, before, after, N_RUNS);
+    printf("test_fd_no_leak[%s, mm=%d]: %d open descriptors before, %d after %d "
+           "runs\n", label, memory_mapped, before, after, N_RUNS);
 }
 
 int main(void) {
@@ -86,9 +82,12 @@ int main(void) {
                "WebAssembly /dev/fd is the host's)\n");
         return TEST_SKIP;
     }
-    int failures = check(0, 0) + check(0, 1) + check(1, 0) + check(1, 1);
-    if (failures != 0) {
-        fprintf(stderr, "test_fd_no_leak: %d check(s) failed\n", failures);
+    check(0, 0);
+    check(0, 1);
+    check(1, 0);
+    check(1, 1);
+    if (g_failures != 0) {
+        fprintf(stderr, "test_fd_no_leak: %d check(s) failed\n", g_failures);
         return 1;
     }
     printf("test_fd_no_leak: PASSED\n");

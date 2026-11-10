@@ -18,6 +18,7 @@
  * own.
  */
 #include "bt2_api.h"
+#include "test_helpers.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -41,11 +42,11 @@ static int count_index_vmas(void) {
 int main(void) {
 #ifdef __EMSCRIPTEN__
     printf("test_mm_no_vma_leak: SKIP (WebAssembly: /proc/self/maps is the host's)\n");
-    return 77; /* skipped (SKIP_RETURN_CODE) */
+    return TEST_SKIP;
 #endif
     if (count_index_vmas() < 0) {
         printf("test_mm_no_vma_leak: SKIP (no /proc/self/maps; non-Linux)\n");
-        return 77; /* skipped (SKIP_RETURN_CODE) */
+        return TEST_SKIP;
     }
 
     bt2_align_config_t config;

@@ -783,7 +783,10 @@ public:
 		asyncData_.waitIdle();
 		closed_ = true;
 		if(out_ != stdout) {
-			fclose(out_);
+			/* fclose() writes what stdio still buffers, which can fail
+			   too */
+			errno = 0;
+			if(fclose(out_) != 0) asyncData_.writeFailed(errno);
 		}
 		/* rethrow a failed write, with the file closed so a second
 		   close() (the destructor's) neither rethrows nor leaks it */
@@ -929,8 +932,8 @@ private:
 		std::mutex m;
 		std::condition_variable cv;
 
-		bool epipe_occurred;                // writeAll() hit EPIPE: the reader went away
-		std::exception_ptr async_exception; // a failed write (writeAll()), for close()
+		bool epipe_occurred;                // a write hit EPIPE: the pipe's reading end closed
+		std::exception_ptr async_exception; // a failed write (writeFailed()), for close()
 
 		// m and cv default constructors are OK as-is
 		AsyncData(FILE* &_out) : abort(false), out(_out), buf(NULL),
@@ -947,6 +950,21 @@ private:
 		void waitIdle() {
 			std::unique_lock<std::mutex> lk(m);
 			while(buf!=NULL) cv.wait(lk);
+		}
+
+		/* Keep a failed write, with errno err, unless one is kept already:
+		   EPIPE in epipe_occurred, anything else, reported through
+		   std::cerr, in async_exception. */
+		void writeFailed(int err) {
+			if(epipe_occurred || async_exception) return;
+			if(err == EPIPE) {
+				epipe_occurred = true;
+				return;
+			}
+			std::cerr << "Error: could not write the output: " << strerror(err)
+			          << std::endl;
+			async_exception = std::make_exception_ptr(
+				std::runtime_error("fwrite failed writing output"));
 		}
 
 		/* Rethrow a failed write in the caller's context. Call when no
@@ -991,33 +1009,20 @@ private:
 
 	/**
 	 * Write len bytes of buf to d.out, unless an earlier write failed. A
-	 * failure is kept in d: an EPIPE (the reader went away) in
-	 * epipe_occurred, anything else in async_exception, which close()
-	 * rethrows. The bytes after a failure are dropped. The writer thread
-	 * and flushSync() both write through here.
+	 * failure is kept in d (writeFailed()), and close() rethrows it; an
+	 * EPIPE (the pipe's reading end closed) ends the output without one.
+	 * The bytes after a failure are dropped. The writer thread and
+	 * flushSync() both write through here.
+	 *
+	 * One fwrite: it retries a partial write itself, so writing less is a
+	 * failure. Retrying here would hide it, since a stream that failed
+	 * counts what it only buffered as written.
 	 */
 	static void writeAll(AsyncData &d, const char *buf, size_t len) {
 		if(d.epipe_occurred || d.async_exception) return;
-		const char *ptr = buf;
-		size_t remaining = len;
-		while(remaining > 0) {
-			errno = 0;
-			size_t n = fwrite((const void *)ptr, 1, remaining, d.out);
-			if(n < remaining && errno == EPIPE) {
-				d.epipe_occurred = true;
-				return;
-			}
-			if(n == 0 || feof(d.out)) {
-				break;
-			}
-			ptr += n;
-			remaining -= n;
-		}
-		if(remaining != 0) {
-			std::cerr << "Error: could not write the output: "
-			          << strerror(errno) << std::endl;
-			d.async_exception = std::make_exception_ptr(
-				std::runtime_error("fwrite failed writing output"));
+		errno = 0;
+		if(fwrite((const void *)buf, 1, len, d.out) < len) {
+			d.writeFailed(errno);
 		}
 	}
 
@@ -1030,9 +1035,7 @@ private:
 			try {
 				writeAll(asyncData, asyncData.buf, asyncData.cur);
 			} catch (...) {
-				if(!asyncData.async_exception) {
-					asyncData.async_exception = std::current_exception();
-				}
+				asyncData.async_exception = std::current_exception();
 			}
 			/* After a failed write too: flush() and close() wait for the
 			   buffer to be handed back. */

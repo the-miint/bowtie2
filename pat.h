@@ -1579,7 +1579,8 @@ private:
 			) {}
 	};
 
-	// The read the reader thread does for a worker, into ps.
+	// One read for a worker, into ps: on the reader thread, or without one
+	// on the thread that called nextReadPair().
 	static std::pair<bool, bool> readNext(PatternSourcePerThread *ps) {
 		if (ps->nextReadPairReady()) {
 			// Should never get in here, but just in case

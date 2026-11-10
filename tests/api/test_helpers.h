@@ -63,8 +63,8 @@ static inline int file_exists(const char *path) {
 #define TEST_HAS_THREADS 1
 #endif
 
-/* Entries in a directory, not counting "." and "..", or -1 if it can't be
-   listed. */
+/* Entries in a directory, not counting names that start with '.', or -1 if
+   it can't be listed. */
 static inline int count_dir_entries(const char *path) {
     DIR *d = opendir(path);
     if (d == NULL) return -1;
@@ -85,15 +85,15 @@ static inline int count_open_fds(void) {
 #ifdef __EMSCRIPTEN__
     return -1;
 #else
-    static int counts = -1;
-    if (counts < 0) {
+    static int trusted = -1; /* whether opening a file adds one; -1 untried */
+    if (trusted < 0) {
         int before = count_dir_entries("/dev/fd");
         FILE *f = fopen("/dev/null", "r");
         int during = f != NULL ? count_dir_entries("/dev/fd") : -1;
         if (f != NULL) fclose(f);
-        counts = before >= 0 && during == before + 1;
+        trusted = before >= 0 && during == before + 1;
     }
-    return counts ? count_dir_entries("/dev/fd") : -1;
+    return trusted ? count_dir_entries("/dev/fd") : -1;
 #endif
 }
 
@@ -107,10 +107,14 @@ static inline int count_threads(void) {
 #endif
 }
 
+/* The SAM flag of a record that did not align. */
+#define SAM_FLAG_UNMAPPED 0x4
+
 /* Whether out has a mapped record for the read named name. */
 static inline int aligned_by_name(const bt2_align_output_t *out, const char *name) {
     for (size_t i = 0; out != NULL && i < out->n_records; i++) {
-        if (strcmp(out->qname[i], name) == 0 && !(out->flag[i] & 0x4)) return 1;
+        if (strcmp(out->qname[i], name) == 0 &&
+            !(out->flag[i] & SAM_FLAG_UNMAPPED)) return 1;
     }
     return 0;
 }

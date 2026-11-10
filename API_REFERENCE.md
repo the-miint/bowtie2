@@ -144,7 +144,7 @@ on the calling thread (see [Threads](#threads)), and `bt2_align_create` and
 The `wasm` job of `.github/workflows/api-tests.yml` is the reference for this
 build. It builds every target with emsdk 6.0.9 and runs every C API test under
 node; ctest reports as skipped the ones that need what the module cannot see
-of its own (`/dev/fd`, `/dev/full`, `/proc/self/maps`):
+of its own (`/dev/fd`, `/proc/self/maps`):
 
 ```bash
 embuilder build zlib        # FindZLIB looks for the port when cmake runs
@@ -583,7 +583,7 @@ error codes. A corrupt index returns `BT2_ERR_INDEX`, not a crash.
 
 This holds at any `nthreads`. Input bowtie2's reader rejects (mate files
 with different read counts, a quality string shorter than its sequence)
-fails the run with `BT2_ERR_INTERNAL`, whichever thread read it; bowtie2's
+fails the run with `BT2_ERR_INTERNAL`, whichever thread found it; bowtie2's
 message, which names the problem, goes to `log_fn` (at the level its prefix
 gives: see [Log Levels](#log-levels)). The run's other reads are not
 returned.
@@ -625,11 +625,13 @@ Level detection is best-effort based on message prefix (`"Error:"`,
 - **`log_fn` NULL, `quiet` = 0:** Output goes to stderr/stdout as normal
   (same as the native bowtie2 binary).
 
-`log_fn` is called one call at a time, on the thread that wrote the line's
-last character. At `nthreads = 1` that is always the thread that called the
-API. At `nthreads > 1` a worker's warnings (e.g. a read too short to align)
-arrive on that worker's thread, and lines two threads write at once can come
-mixed in one call.
+`log_fn` is called one call at a time. A line goes out when its newline is
+written, on the thread that wrote it; text left without one goes out at the
+end of the call, on the thread that called the API. At `nthreads = 1` every
+call is on that thread. At `nthreads > 1` a worker's warnings (e.g. a read
+too short to align) arrive on that worker's thread, and two threads writing
+at once can split a line across calls or mix two lines in one, which then
+gets the level of the prefix it starts with.
 
 ### Example
 
@@ -687,7 +689,8 @@ memory, within noise paired-end); the results are the same. The native
 `bowtie2` binary keeps its threads at any `-p`.
 
 `bt2_align_run` and `bt2_align_run_files` block `SIGPIPE` on the calling
-thread (`pthread_sigmask`) and leave it blocked.
+thread (`pthread_sigmask`) once the index has loaded, and leave it blocked
+(not on Windows).
 
 ---
 

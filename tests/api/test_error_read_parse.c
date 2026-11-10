@@ -1,22 +1,24 @@
 /*
- * An input error the read parser throws on returns an error from the API and
- * leaves the context usable, at one thread and at two. At one thread the
- * parser runs on the calling thread. At two, the reader thread parses the
- * first read of each batch and a worker thread the rest; an exception on
- * either is kept and rethrown on the calling thread once the workers stop.
+ * An input error bowtie2 throws on while reading or parsing reads returns an
+ * error from the API and leaves the context usable, at one thread and at
+ * two. At one thread both run on the calling thread. At two, the reader
+ * thread reads each batch and parses its first read, and a worker thread
+ * parses the rest; an exception on either is kept and rethrown on the
+ * calling thread once the workers stop.
  *
  * Two errors, one per entry point:
  *   - bt2_align_run_files, paired, with mate files of different read counts
  *     (tests/api/data/inline_reads.fq has two reads, one_read.fq one), which
  *     the reader finds;
  *   - bt2_align_run with a good read, then one whose quality string is
- *     shorter than its sequence, which the parser of the second read finds.
- * Each must return BT2_ERR_INTERNAL with a message, and the parser's own
+ *     shorter than its sequence, which parsing the second read finds.
+ * Each must return BT2_ERR_INTERNAL with a message, and bowtie2's own
  * message, which names the problem, must reach log_fn: so the run failed on
  * the error under test and not on something else. The test repeats both and
  * checks that the number of open file descriptors does not grow (a failed
- * run must close the read files and the output file it opened), then aligns
- * on the same context.
+ * run must close the read files and the output file it opened); in
+ * WebAssembly, where /dev/fd is the host's, it is not counted. Then it
+ * aligns on the same context.
  *
  * Run from PROJECT_SOURCE_DIR, where the example index lives.
  */
@@ -30,14 +32,16 @@
 #define MATES_2 "tests/api/data/one_read.fq"
 #define N_RUNS  20
 
-/* The parser's messages (pat.cpp) for the two errors. */
+/* bowtie2's messages (pat.cpp) for the two errors. */
 #define MATES_MSG "fewer reads in file specified with -2"
 #define QUALS_MSG "Read short_qual has more read characters than quality values"
 
 static int g_failures = 0;
 
 /* Set when log_fn gets the message the current run should produce. log_fn
-   is called one line at a time, under the library's lock. */
+   is called one call at a time, and the message is looked for within a call:
+   at two threads a line another thread writes at the same moment could share
+   it, though none of these reads makes bowtie2 write anything else. */
 static const char *g_want_msg;
 static int g_saw_msg;
 
@@ -57,8 +61,8 @@ static void expect_failure(const char *what, int nthreads, int rc,
     const char *msg = bt2_align_last_error(ctx);
     CHECK_MSG(msg != NULL && msg[0] != '\0', "[%d thread(s)] %s failed with no "
               "message", nthreads, what);
-    CHECK_MSG(g_saw_msg, "[%d thread(s)] %s failed, but log_fn never got the "
-              "parser's \"%s\"", nthreads, what, want_msg);
+    CHECK_MSG(g_saw_msg, "[%d thread(s)] %s failed, but log_fn never got "
+              "bowtie2's \"%s\"", nthreads, what, want_msg);
 }
 
 static void fail_files(bt2_align_ctx_t *ctx, int nthreads) {
@@ -113,6 +117,10 @@ static void check_threads(int nthreads) {
     fail_files(ctx, nthreads);
     fail_memory(ctx, nthreads);
     int fds_before = count_open_fds();
+#ifndef __EMSCRIPTEN__
+    CHECK_MSG(fds_before >= 0, "[%d thread(s)] open file descriptors could not "
+              "be counted", nthreads);
+#endif
     for (int i = 0; i < N_RUNS; i++) {
         fail_files(ctx, nthreads);
         fail_memory(ctx, nthreads);

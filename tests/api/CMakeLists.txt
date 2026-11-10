@@ -77,13 +77,20 @@ add_api_test(test_align_inline)
 # one thread and at two
 add_api_test(test_error_read_parse)
 
-# OutFileBuf without a writer thread reports a failed write (a C++ unit test)
-add_executable(test_outfilebuf_sync test_outfilebuf_sync.cpp)
-target_link_libraries(test_outfilebuf_sync bowtie2-align-s-lib)
-add_test(NAME api-test_outfilebuf_sync
-  COMMAND test_outfilebuf_sync
+# OutFileBuf reports a failed write, with and without its writer thread (a
+# C++ unit test). A buffer the writer does not hand back makes close() wait
+# forever, so the test gets a short timeout.
+add_executable(test_outfilebuf_write_error test_outfilebuf_write_error.cpp)
+target_link_libraries(test_outfilebuf_write_error bowtie2-align-s-lib)
+# Where it writes its one file
+target_compile_definitions(test_outfilebuf_write_error PRIVATE
+  TEST_SCRATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME api-test_outfilebuf_write_error
+  COMMAND test_outfilebuf_write_error
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-set_tests_properties(api-test_outfilebuf_sync PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(api-test_outfilebuf_write_error PROPERTIES
+  SKIP_RETURN_CODE 77
+  TIMEOUT 120)
 
 # Phase 6 tests — index builder API (link against build library)
 macro(add_build_api_test name)

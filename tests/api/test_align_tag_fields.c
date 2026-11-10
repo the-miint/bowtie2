@@ -52,8 +52,6 @@ static const char *QUALS[] = {
     "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
 };
 
-#define SAM_FLAG_UNMAPPED 0x4
-
 static void check_single_end(void) {
     bt2_align_config_t config;
     bt2_align_config_init(&config);
