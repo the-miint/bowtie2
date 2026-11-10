@@ -1,5 +1,11 @@
 # API tests — compile as C to verify C compatibility of bt2_api.h
 
+# The tests check with assert(). Every build type CI uses defines NDEBUG (Release
+# in the top-level CMakeLists.txt, RelWithDebInfo through CMake's default flags),
+# which compiles those checks out. Undefine it for the targets in this directory;
+# the libraries they link keep their own flags.
+add_compile_options(-UNDEBUG)
+
 # Helper macro for C API test executables
 macro(add_api_test name)
   add_executable(${name} ${name}.c)

@@ -14,9 +14,6 @@
  *
  * Linux-only: it reads /proc/self/maps. On platforms without it the test
  * skips (passes).
- *
- * NOTE: API tests are built with NDEBUG, so assert() is a no-op. Use explicit
- * checks that return non-zero on failure.
  */
 #include "bt2_api.h"
 #include <stdio.h>
