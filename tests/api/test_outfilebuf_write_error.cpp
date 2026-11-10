@@ -8,15 +8,16 @@
  *     writes after that and close() all return.
  *   - Each failure reaches the API's log_fn once, as one BT2_LOG_ERROR line.
  *   - It fails wherever the write does: in fwrite (more than stdio
- *     buffers), in fclose (less), or partway (a file-size limit cuts the
- *     write short, and the stream then counts what it only buffers as
- *     written).
+ *     buffers) or in fclose (less), at once (/dev/full) or partway (a
+ *     file-size limit cuts the write short, and the stream then counts
+ *     what it only buffers as written).
  *   - A write to a pipe whose reading end has closed (EPIPE, with SIGPIPE
  *     ignored) ends the output without an error: close() does not throw.
  *
  * /dev/full fails every write with ENOSPC; its checks skip where there is
- * none (macOS). In WebAssembly only the no-writer /dev/full checks run,
- * without the descriptor count (/dev/fd is the host's there).
+ * none (macOS), where the file-size limit still fails both fwrite and
+ * fclose. In WebAssembly only the no-writer /dev/full checks run, without
+ * the descriptor count (/dev/fd is the host's there).
  */
 #include "filebuf.h"
 #include "bt2_log_streambuf.h"
@@ -119,9 +120,13 @@ static void check_full(bool async) {
 }
 
 #ifndef __EMSCRIPTEN__
-static void check_partial_write(bool async) {
-    const char *mode = async ? "writer thread, partial write"
-                             : "no writer thread, partial write";
+/* Write data with the file-size limit at limit, below data's size: the
+   write gets that far, then fails with EFBIG. */
+static void check_partial_write(bool async, const std::string &data,
+                                rlim_t limit, const char *where) {
+    const std::string mode_s = std::string(async ? "writer thread" : "no writer thread") +
+                               ", partial write in " + where;
+    const char *mode = mode_s.c_str();
     const std::string path =
         std::string(TEST_SCRATCH_DIR) + "/outfilebuf_partial_write.out";
     struct rlimit unlimited, limited;
@@ -130,7 +135,7 @@ static void check_partial_write(bool async) {
         return;
     }
     limited = unlimited;
-    limited.rlim_cur = BIG.size() / 10; // the write gets this far, then EFBIG
+    limited.rlim_cur = limit;
     LogSeen seen(EFBIG);
     bool threw = false;
     {
@@ -138,7 +143,7 @@ static void check_partial_write(bool async) {
         OutFileBuf ob(path.c_str(), false, async);
         CHECK_MSG(setrlimit(RLIMIT_FSIZE, &limited) == 0, "[%s] setrlimit: %s",
                   mode, std::strerror(errno));
-        ob.writeString(BIG);
+        ob.writeString(data);
         threw = close_threw(ob);
         setrlimit(RLIMIT_FSIZE, &unlimited);
     }
@@ -197,8 +202,10 @@ int main() {
 #ifndef __EMSCRIPTEN__
     std::signal(SIGPIPE, SIG_IGN); // the write gets EPIPE instead
     std::signal(SIGXFSZ, SIG_IGN); // the write gets EFBIG instead
-    check_partial_write(false);
-    check_partial_write(true);
+    for (int async = 0; async <= 1; async++) {
+        check_partial_write(async, BIG, BIG.size() / 10, "fwrite");
+        check_partial_write(async, SMALL, SMALL.size() / 2, "fclose");
+    }
     check_closed_pipe(false);
     check_closed_pipe(true);
 #endif

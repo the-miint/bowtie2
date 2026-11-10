@@ -686,7 +686,7 @@ public:
 	 */
 	~OutFileBuf() {
 		/* A throw out of a destructor ends the process, so close()'s
-		   rethrow of a failed write stops here; writeAll() reported the
+		   rethrow of a failed write stops here; writeFailed() reported the
 		   failure through std::cerr when it happened. */
 		try { close(); } catch(...) {}
 		asyncData_.notifyAbort();
@@ -964,7 +964,7 @@ private:
 			std::cerr << "Error: could not write the output: " << strerror(err)
 			          << std::endl;
 			async_exception = std::make_exception_ptr(
-				std::runtime_error("fwrite failed writing output"));
+				std::runtime_error("writing the output failed"));
 		}
 
 		/* Rethrow a failed write in the caller's context. Call when no
