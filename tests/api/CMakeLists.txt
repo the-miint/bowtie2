@@ -60,6 +60,9 @@ add_api_test(test_direct_no_tempfile)
 # across repeated runs on one context (munmap-on-teardown fix).
 add_api_test(test_mm_no_vma_leak)
 
+# Repeated runs on one context leave no file descriptor open.
+add_api_test(test_fd_no_leak)
+
 # Phase 5 tests — error handling and log callback
 add_api_test(test_error_no_exit)
 add_api_test(test_error_recovery)

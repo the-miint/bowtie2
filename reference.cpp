@@ -17,6 +17,7 @@
  * along with Bowtie 2.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <memory>
 #include <string>
 #include <string.h>
 #include "reference.h"
@@ -60,11 +61,15 @@ BitPairReference::BitPairReference(
 		loaded_ = false;
 		return;
 	}
+	// Each file is closed however the constructor exits. A mapping made from
+	// f4 outlives its FILE; the copy path below reads .4 through its own.
+	unique_ptr<FILE, int (*)(FILE*)> f3_closer(f3, fclose);
     if((f4 = fopen(s4.c_str(), "rb"))  == NULL) {
         cerr << "Could not open reference-string index file " << s4 << " for reading." << endl;
 		loaded_ = false;
 		return;
 	}
+	unique_ptr<FILE, int (*)(FILE*)> f4_closer(f4, fclose);
 #ifdef BOWTIE_MM
     char *mmFile = NULL;
 	if(useMm_) {
@@ -170,7 +175,7 @@ BitPairReference::BitPairReference(
 	bufSz_ = cumsz;
 	assert_eq(nrefs_, refLens_.size());
 	assert_eq(sz, recs_.size());
-	if (f3 != NULL) fclose(f3); // done with .3.gEbwt_ext file
+	f3_closer.reset(); // done with .3.gEbwt_ext file
 	// Round cumsz up to nearest byte boundary
 	if((cumsz & 3) != 0) {
 		cumsz += (4 - (cumsz & 3));
