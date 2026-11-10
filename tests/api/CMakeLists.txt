@@ -105,6 +105,16 @@ add_test(NAME api-test_build_then_align
   COMMAND test_build_then_align
   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+# The aligner's and the builder's create check nthreads (combined lib)
+add_executable(test_nthreads_config test_nthreads_config.c)
+target_link_libraries(test_nthreads_config bowtie2-combined-s-lib)
+set_target_properties(test_nthreads_config PROPERTIES
+  C_STANDARD 11
+  C_STANDARD_REQUIRED ON)
+add_test(NAME api-test_nthreads_config
+  COMMAND test_nthreads_config
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
 # Reproducer for GPL-boundary macOS aarch64 SIGSEGV with all-N + no_unal
 add_executable(test_repro_no_unal_all_n test_repro_no_unal_all_n.c)
 target_link_libraries(test_repro_no_unal_all_n bowtie2-combined-s-lib)
