@@ -28,6 +28,8 @@
 #include <stdexcept>
 #include <stdlib.h>
 #include <string>
+#include <exception>
+#include <mutex>
 #include <thread>
 #include <time.h>
 #include <utility>
@@ -1963,6 +1965,8 @@ createPatsrcFactory(
 #define PTHREAD_ATTRS (PTHREAD_CREATE_JOINABLE | PTHREAD_CREATE_DETACHED)
 
 static PatternSourceReadAheadFactory* multiseed_readahead_factory;
+static std::mutex               multiseed_error_mutex;
+static std::exception_ptr       multiseed_error; // first throw of a worker thread
 static Ebwt*                    multiseed_ebwtFw;
 static Ebwt*                    multiseed_ebwtBw;
 static Scoring*                 multiseed_sc;
@@ -4649,6 +4653,26 @@ static void multiseedSearchWorker_2p5(void *vp) {
 	return;
 }
 
+/**
+ * Thread entry for a search worker. An exception thrown on a thread ends the
+ * process (std::terminate), so an input error the worker throws is kept
+ * here instead: the first one, for multiseedSearch to rethrow once every
+ * worker is done. The reader then reports the end of the input, so the other
+ * workers stop, and this worker counts itself done, as it would have.
+ */
+static void multiseedSearchWorkerThread(void (*worker)(void*), void *vp) {
+	try {
+		worker(vp);
+	} catch(...) {
+		{
+			std::lock_guard<std::mutex> lk(multiseed_error_mutex);
+			if(!multiseed_error) multiseed_error = std::current_exception();
+		}
+		multiseed_readahead_factory->stop();
+		((thread_tracking_pair*)vp)->done->fetch_add(1);
+	}
+}
+
 #ifndef _WIN32
 /**
  * Print friendly-ish message pertaining to failed system call.
@@ -4942,9 +4966,11 @@ static void multiseedSearch(
 				continue;
 			}
 			if(bowtie2p5) {
-				threads.push_back(new std::thread(multiseedSearchWorker_2p5, (void*)&tps[i]));
+				threads.push_back(new std::thread(multiseedSearchWorkerThread,
+					multiseedSearchWorker_2p5, (void*)&tps[i]));
 			} else {
-				threads.push_back(new std::thread(multiseedSearchWorker, (void*)&tps[i]));
+				threads.push_back(new std::thread(multiseedSearchWorkerThread,
+					multiseedSearchWorker, (void*)&tps[i]));
 			}
 			threads[i]->detach();
 			SLEEP(10);
@@ -4969,6 +4995,17 @@ static void multiseedSearch(
 			del_pid(thread_stealing_dir.c_str(), pid);
 		}
 #endif
+		// An input error a worker thread or the reader thread threw is
+		// rethrown here, on the calling thread, where driver()'s caller
+		// catches it.
+		std::exception_ptr error;
+		{
+			std::lock_guard<std::mutex> lk(multiseed_error_mutex);
+			std::swap(error, multiseed_error);
+		}
+		std::exception_ptr read_error = readahead_factory.finish();
+		if(!error) error = read_error;
+		if(error) std::rethrow_exception(error);
 	}
 	if(!metricsPerRead && (metricsOfb != NULL || metricsStderr)) {
 		metrics.reportInterval(metricsOfb, metricsStderr, true, NULL);

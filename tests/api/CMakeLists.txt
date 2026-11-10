@@ -69,9 +69,10 @@ add_api_test(test_error_recovery)
 add_api_test(test_log_callback)
 add_api_test(test_error_invalid_mp)
 
-# At nthreads=1 the aligner runs on the calling thread: it starts no thread,
-# and an input error the read parser throws comes back as an error return
+# At nthreads=1 the aligner runs on the calling thread, starting no thread
 add_api_test(test_align_inline)
+# An input error the read parser throws comes back as an error return, at
+# one thread and at two
 add_api_test(test_error_read_parse)
 
 # Phase 6 tests — index builder API (link against build library)

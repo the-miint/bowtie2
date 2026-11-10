@@ -31,6 +31,8 @@
 #include <ctype.h>
 #include <vector>
 #include <queue>
+#include <atomic>
+#include <exception>
 #include "alphabet.h"
 #include "assert_helpers.h"
 #include "random_source.h"
@@ -1343,12 +1345,33 @@ public:
 		psfact_(composer,pp),
 		psq_ready_(useCV),
 		psq_idle_(useCV,psfact_,n),
+		read_error_(),
+		stopped_(false),
 		asynct_(async ? std::thread(readAsync, this) : std::thread()) {}
 
 	~PatternSourceReadAheadFactory() {
 		if(!asynct_.joinable()) return; // no reader thread to stop
 		returnUnready(NULL); // this will signal asynct_ it is time to quit
 		asynct_.join();
+	}
+
+	// From now on the reader thread reports the end of the input instead of
+	// reading. A worker that throws calls it, so the others stop.
+	void stop() {
+		stopped_ = true;
+	}
+
+	// Stop and join the reader thread, if there is one, and return what a
+	// read on it threw (nothing if no read did). Call once the workers are
+	// done; without a reader thread a read's exception reaches the caller of
+	// nextReadPair() instead.
+	std::exception_ptr finish() {
+		stop();
+		if(asynct_.joinable()) {
+			returnUnready(NULL); // this will signal asynct_ it is time to quit
+			asynct_.join();
+		}
+		return read_error_;
 	}
 
 	// wait for data, if none in the queue
@@ -1570,11 +1593,22 @@ private:
 			re.ps = psq_idle.pop();
 			if (re.ps==NULL) break; // the destructor added this in the queue
 
-			if (re.ps->nextReadPairReady()) {
+			if (obj->read_error_ || obj->stopped_) {
+				// A read threw, or a worker did: report the end of the
+				// input, so every worker stops.
+				re.readResult = make_pair(false, true);
+			} else if (re.ps->nextReadPairReady()) {
 				// Should never get in here, but just in case
 				re.readResult = make_pair(true, false);
 			} else {
-				re.readResult = re.ps->nextReadPair();
+				try {
+					re.readResult = re.ps->nextReadPair();
+				} catch(...) {
+					// Thrown on this thread it would end the process: keep
+					// it for finish() to return.
+					obj->read_error_ = std::current_exception();
+					re.readResult = make_pair(false, true);
+				}
 			}
 			psq_ready.push(re);
                 }
@@ -1583,7 +1617,9 @@ private:
 	PatternSourcePerThreadFactory psfact_;
 	LockedREQueue psq_ready_;
 	LockedPSQueue psq_idle_;
-	std::thread asynct_;
+	std::exception_ptr read_error_; // what a read on asynct_ threw; its own
+	std::atomic<bool> stopped_;
+	std::thread asynct_; // last: it starts in the constructor and uses the rest
 };
 
 // Simple wrapper for safely holding the result of PatternSourceReadAheadFactory
@@ -1594,12 +1630,24 @@ public:
 		re_(fact.nextReadPair()) {}
 
 	~PatternSourceReadAhead() {
+		// Destroyed by a throw, the buffer may hold a half-parsed read that
+		// the reader thread would hand to another worker as it stands: stop
+		// the reads before giving it back.
+		if(unwinding()) fact_.stop();
 		fact_.returnUnready(re_);
 	}
 
 	const std::pair<bool, bool>& readResult() const { return re_.readResult;}
 	PatternSourcePerThread* ptr() {return re_.ps;}
 private:
+	static bool unwinding() {
+#if __cplusplus >= 201703L
+		return std::uncaught_exceptions() > 0;
+#else
+		return std::uncaught_exception();
+#endif
+	}
+
 	PatternSourceReadAheadFactory& fact_;
 	PatternSourceReadAheadFactory::ReadElement re_;
 };
