@@ -136,3 +136,34 @@ jobs:
           # sweep takes >30 min under TSan instrumentation.
           BT2_FAST_SUBSET: "1"
         run: cd build && ctest -R api-test --output-on-failure --timeout 1800
+
+  # wasm32 without pthreads, run under node: the build a WebAssembly host
+  # that cannot start threads links, so the API runs at nthreads=1 only;
+  # test_align_inline checks that alignment then starts no thread. Every C
+  # API test (api-test_*) runs. The Python ones (api-test-*) compare the API
+  # with the native CLI from build/, so they are left to the native lanes.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: 6.0.9
+      # FindZLIB looks in the sysroot at configure time, so the port must be
+      # built before cmake runs.
+      - name: Build the zlib port
+        run: embuilder build zlib
+      - name: Configure (emcmake)
+        run: |
+          CF="-fwasm-exceptions -msse2 -msimd128 -sUSE_ZLIB=1"
+          LF="-fwasm-exceptions -sUSE_ZLIB=1 -sNODERAWFS=1 -sSTACK_SIZE=8MB -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=1"
+          emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release -DBOWTIE_MM=OFF \
+            -DCMAKE_C_FLAGS="$CF" -DCMAKE_CXX_FLAGS="$CF" -DCMAKE_EXE_LINKER_FLAGS="$LF"
+      - name: Build
+        run: cmake --build build-wasm -j$(nproc)
+      # emcmake sets node as the crosscompiling emulator, so ctest runs each
+      # .js from the source root, where the tests find example/.
+      - name: Run the C API tests under node
+        run: cd build-wasm && ctest -R '^api-test_' --output-on-failure --timeout 600
