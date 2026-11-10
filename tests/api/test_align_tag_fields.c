@@ -25,9 +25,13 @@
 #include <stdio.h>
 #include <string.h>
 
-/* First three sequences align to lambda_virus; the fourth (polyA-40) does
-   not — lambda's reference has no 40-bp A homopolymer, so this read fails
-   to clear the default end-to-end score-min threshold. */
+/* The first three sequences are 41-base stretches of
+   example/reference/lambda_virus.fa, at 1-based positions 1001, 20001 and
+   40001, each occurring once in it. aligned_2 carries one substitution
+   (G->T at read position 21), so its XM is 1; the other two match exactly.
+   The fourth (41 A's) does not align — lambda's reference has no long A
+   homopolymer, so this read fails to clear the default end-to-end score-min
+   threshold. */
 static const char *NAMES[] = {
     "aligned_1",
     "aligned_2",
@@ -35,9 +39,9 @@ static const char *NAMES[] = {
     "polya_unaligned",
 };
 static const char *SEQS[] = {
-    "AGCTTTTCATTCTGACTGCAACGGGCAATATGTCTCTGTGT",
-    "TTTAAATATGGTCTGATGATCTGGTTTATTGTGTCTTCTGA",
-    "GCGATCTGTCTATTTCGTTCATCCATAGTTGCCTGACTCCC",
+    "GCAGCGCAACACCCTTATCTGGTTGCCGACGGATGGTGATG",
+    "TCCGTGGTGGCACAGAGTACTGCAGACGCGAAGAAATCAGC",
+    "TCCGGATGCGGAGTCTTATCCGTGGAAATCAAACGCGCACT",
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",  /* 41 A's */
 };
 static const char *QUALS[] = {
@@ -102,6 +106,9 @@ static void check_single_end(void) {
             assert(output->tag_xo[i] >= 0);
             assert(output->tag_xg[i] >= 0);
             assert(output->tag_xg[i] >= output->tag_xo[i]);
+            /* aligned_2 carries the one substitution; the others match exactly. */
+            assert(output->tag_xm[i] ==
+                   (strcmp(output->qname[i], "aligned_2") == 0 ? 1 : 0));
             saw_aligned = 1;
         }
     }
